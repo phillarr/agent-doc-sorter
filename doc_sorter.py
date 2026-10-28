@@ -1,0 +1,121 @@
+# --- Bibliothèques ---
+import time, shutil, anthropic                      # temps, déplacement de fichiers, API Claude
+from datetime import datetime                       # date et heure pour le journal
+from pathlib import Path                            # manipulation des chemins
+from anthropic import beta_tool                     # transforme une fonction Python en outil pour l'IA
+from pypdf import PdfReader                         # lecture des PDF
+from docx import Document                           # lecture des Word
+from openpyxl import load_workbook                  # lecture des Excel
+from watchdog.observers import Observer             # surveille un dossier
+from watchdog.events import FileSystemEventHandler  # réagit aux nouveaux fichiers
+
+# --- Configuration ---
+HOME = Path.home()                                  # C:\Users\<nom>
+DL = HOME / "Downloads"                             # dossier surveillé
+A_TRIER = DL / "A_trier"                            # destination en cas de doute
+RACINES = [HOME / "Documents", HOME / "Pictures",   # seuls endroits autorisés (et leurs sous-dossiers)
+           HOME / "Music", HOME / "Videos"]
+JOURNAL = Path(__file__).parent / "journal.log"     # fichier de log, à côté du script
+
+# --- Journal : écrit à l'écran ET dans le fichier ---
+def journal(message):
+    ligne = f"{datetime.now():%Y-%m-%d %H:%M:%S} | {message}"
+    print(ligne)
+    with open(JOURNAL, "a", encoding="utf-8") as f:                    # "a" = ajoute à la fin sans effacer
+        f.write(ligne + "\n")
+
+# --- Outil 1 : voir les dossiers existants ---
+@beta_tool
+def lister_dossiers() -> str:
+    """Liste les dossiers et sous-dossiers existants où un fichier peut être rangé."""
+    dossiers = []
+    for racine in RACINES:
+        dossiers.append(racine.name)                                    # ex : Documents
+        for d in racine.glob("*/"):                                     # 1er niveau : Documents/Travail
+            if not d.name.startswith("."):
+                dossiers.append(f"{racine.name}/{d.name}")
+                for s in d.glob("*/"):                                  # 2e niveau : Documents/Travail/Réunions
+                    if not s.name.startswith("."):
+                        dossiers.append(f"{racine.name}/{d.name}/{s.name}")
+    return "\n".join(dossiers[:300])                                    # limite pour rester rapide
+
+# --- Outil 2 : lire le début d'un fichier ---
+@beta_tool
+def lire_debut(nom: str) -> str:
+    """Lit le début du contenu d'un fichier PDF, Word, Excel ou texte du dossier Téléchargements."""
+    f = DL / nom
+    ext = f.suffix.lower()
+    try:
+        if ext == ".pdf":
+            texte = PdfReader(f).pages[0].extract_text() or ""          # 1re page
+        elif ext == ".docx":
+            texte = "\n".join(p.text for p in Document(f).paragraphs)   # paragraphes
+        elif ext in (".xlsx", ".xlsm"):
+            feuille = load_workbook(f, read_only=True, data_only=True).active
+            texte = "\n".join(" | ".join(str(c) for c in row if c is not None)
+                              for row in feuille.iter_rows(max_row=20, values_only=True))  # 20 lignes
+        else:
+            texte = f.read_text(errors="ignore")                        # texte brut
+        journal(f"  lecture du contenu de {nom}")
+        return texte[:1500]                                             # 1500 caractères max
+    except Exception as e:
+        return f"Illisible : {e}"
+
+# --- Outil 3 : déplacer un fichier ---
+@beta_tool
+def deplacer(nom: str, destination: str, raison: str) -> str:
+    """Déplace un fichier vers un dossier existant (chemin tel que donné par lister_dossiers) ou vers 'A_trier'.
+    raison : explique en une phrase courte pourquoi tu choisis ce dossier."""
+    src = DL / nom
+    if not src.exists():                                                # déjà déplacé ?
+        return "Fichier introuvable"
+    if destination == "A_trier":
+        dossier = A_TRIER
+        dossier.mkdir(exist_ok=True)                                    # seul dossier qu'il peut créer
+    else:
+        dossier = (HOME / destination).resolve()
+        autorise = any(dossier == r or r in dossier.parents for r in RACINES)
+        if not autorise or not dossier.is_dir():                        # sécurité : existant et autorisé uniquement
+            journal(f"  refusé : {destination}")
+            return "Destination non autorisée ou inexistante, choisis-en une de la liste"
+    cible = dossier / nom
+    if cible.exists():                                                  # évite d'écraser
+        cible = dossier / f"{src.stem}_{int(time.time())}{src.suffix}"
+    shutil.move(src, cible)                                             # déplacement réel
+    journal(f"RANGÉ   | {nom} -> {cible} | raison : {raison}")
+    return "déplacé"
+
+# --- L'agent : l'IA décide ---
+def ranger(nom):
+    journal(f"NOUVEAU | {nom}")
+    anthropic.Anthropic().beta.messages.tool_runner(
+        model="claude-haiku-5-5", max_tokens=800,                       # modèle rapide et peu cher
+        tools=[lister_dossiers, lire_debut, deplacer],                  # ses 3 outils
+        messages=[{"role": "user", "content":
+            f"Nouveau fichier téléchargé : {nom}. "
+            "1. Regarde d'abord les dossiers existants. "
+            "2. Si le nom ne suffit pas, lis le début du fichier. "
+            "3. Range-le dans le dossier existant le plus précis (un dossier au nom de l'organisme, "
+            "du projet ou du sujet est prioritaire sur un dossier générique). "
+            "Si aucun ne convient clairement, mets-le dans A_trier. "
+            "Indique toujours ta raison."}]
+    ).until_done()                                                      # tourne jusqu'à la fin
+
+# --- Le déclencheur ---
+class Handler(FileSystemEventHandler):
+    def on_created(self, e): self.check(e.src_path)                     # nouveau fichier
+    def on_moved(self, e): self.check(e.dest_path)                      # fichier renommé (fin de téléchargement)
+    def check(self, p):
+        p = Path(p)
+        try:
+            if p.parent == DL and p.suffix.lower() not in (".crdownload", ".tmp", ".part"):  # ignore les téléchargements en cours
+                time.sleep(2)                                           # laisse le fichier finir de s'écrire
+                if p.is_file():
+                    ranger(p.name)                                      # lance l'agent
+        except Exception as e:
+            journal(f"ERREUR  | {p.name} | {e}")                        # erreurs aussi dans le journal
+
+# --- Démarrage ---
+obs = Observer(); obs.schedule(Handler(), str(DL)); obs.start()         # surveille Downloads
+journal(f"DÉMARRAGE | surveillance de {DL}")
+while True: time.sleep(1)                                               # Ctrl + C pour arrêter
