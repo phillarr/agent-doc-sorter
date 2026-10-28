@@ -34,7 +34,7 @@ def lister_dossiers() -> str:
         for d in racine.glob("*/"):                                     # 1er niveau : Documents/Travail
             if not d.name.startswith("."):
                 dossiers.append(f"{racine.name}/{d.name}")
-                for s in d.glob("*/"):                                  # 2e niveau : Documents/Travail/Réunions
+                for s in d.glob("*/"):                                  # 2e niveau : Documents/Travail/Client
                     if not s.name.startswith("."):
                         dossiers.append(f"{racine.name}/{d.name}/{s.name}")
     return "\n".join(dossiers[:300])                                    # limite pour rester rapide
@@ -85,20 +85,23 @@ def deplacer(nom: str, destination: str, raison: str) -> str:
     journal(f"RANGÉ   | {nom} -> {cible} | raison : {raison}")
     return "déplacé"
 
-# --- L'agent : l'IA décide ---
+# --- L'agent : l'IA décide (prompt structuré ROCIF) ---
 def ranger(nom):
     journal(f"NOUVEAU | {nom}")
     anthropic.Anthropic().beta.messages.tool_runner(
         model="claude-haiku-5-5", max_tokens=800,                       # modèle rapide et peu cher
         tools=[lister_dossiers, lire_debut, deplacer],                  # ses 3 outils
         messages=[{"role": "user", "content":
-            f"Nouveau fichier téléchargé : {nom}. "
-            "1. Regarde d'abord les dossiers existants. "
-            "2. Si le nom ne suffit pas, lis le début du fichier. "
-            "3. Range-le dans le dossier existant le plus précis (un dossier au nom de l'organisme, "
-            "du projet ou du sujet est prioritaire sur un dossier générique). "
-            "Si aucun ne convient clairement, mets-le dans A_trier. "
-            "Indique toujours ta raison."}]
+            "RÔLE : Tu es l'assistant de rangement de fichiers de Phil.\n"
+            f"OBJECTIF : Ranger le fichier téléchargé « {nom} » au bon endroit.\n"
+            "CONTEXTE : Phil classe ses fichiers par organisme ou projet (ex : Documents/Travail) "
+            "avant de les classer par type. Les sous-dossiers précis sont toujours préférés aux dossiers génériques.\n"
+            "INSTRUCTIONS :\n"
+            "1. Liste les dossiers existants.\n"
+            "2. Si le nom ne suffit pas, lis le début du fichier.\n"
+            "3. Range-le dans le dossier existant le plus précis.\n"
+            "4. Si aucun ne convient clairement, mets-le dans A_trier. Ne devine jamais.\n"
+            "FORMAT : Une seule action de déplacement, avec une raison d'une phrase."}]
     ).until_done()                                                      # tourne jusqu'à la fin
 
 # --- Le déclencheur ---
