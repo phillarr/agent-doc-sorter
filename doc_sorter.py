@@ -100,7 +100,9 @@ def ranger(nom):
             "1. Liste les dossiers existants.\n"
             "2. Si le nom ne suffit pas, lis le début du fichier.\n"
             "3. Range-le dans le dossier existant le plus précis.\n"
-            "4. Si aucun ne convient clairement, mets-le dans A_trier. Ne devine jamais.\n"
+            "4. S'il n'existe pas de dossier pour l'organisme ou le projet, utilise un dossier par type de document "
+            "s'il y en a un (ex : Documents/Factures pour une facture). Mets-le dans A_trier seulement si aucun "
+            "dossier ne convient, même par type. Ne devine jamais.\n"
             "FORMAT : Une seule action de déplacement, avec une raison d'une phrase."}]
     ).until_done()                                                      # tourne jusqu'à la fin
     if (DL / nom).exists():                                             # l'IA s'est arrêtée sans déplacer le fichier
