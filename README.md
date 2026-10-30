@@ -4,7 +4,7 @@ AI agent that automatically sorts downloaded files on Windows.
 
 When a file lands in Downloads, the agent looks at your existing folders, reads the beginning of the file if needed, then moves it to the right place in Documents, Pictures, Music or Videos. When in doubt, it puts it in `Downloads\A_trier` ("to sort") and shows a notification.
 
-The code comments and the log labels are in French. The prompt is in English; the reasons Claude gives (shown in the log and notifications) are written in the language set by `LANGUE`.
+The prompt and the code comments are in English; variable names, log labels and the `A_trier` folder are in French; the reasons Claude gives (shown in the log and notifications) are written in the language set by `LANGUE`.
 
 ## How it works
 
