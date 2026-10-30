@@ -166,6 +166,7 @@ def move_file(name: str, destination: str, reason: str) -> str:
     if target.is_file() and filecmp.cmp(src, target, shallow=False):    # same name AND same content, byte by byte
         src.unlink()                                                    # useless copy: the original is already sorted
         log(f"DUPLICATE | {name} already in {folder} (identical) -> downloaded copy deleted")
+        notify(f"Duplicate deleted: {name}", f"Already in {folder.relative_to(HOME).as_posix()}")
         return "already there, identical: copy deleted"
     if target.exists():                                                 # same name, different content: avoid overwriting
         target = folder / f"{src.stem}_{datetime.now():%Y-%m-%d_%H%M%S}{src.suffix}"
@@ -173,6 +174,8 @@ def move_file(name: str, destination: str, reason: str) -> str:
     log(f"SORTED | {name} -> {target} | reason: {reason}")
     if folder == TO_SORT:
         notify(f"To sort: {name}", reason)                              # the user has to decide
+    else:
+        notify(f"Sorted: {target.name}", folder.relative_to(HOME).as_posix())  # the move is too fast to see: shows where it went
     return "moved"
 
 # --- The agent: the AI decides (ROCIF structured prompt) ---

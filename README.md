@@ -16,7 +16,7 @@ The reasons Claude gives (shown in the log and notifications) are written in the
 - Safeguards: the agent only touches files placed directly in Downloads, only moves them into existing folders under Documents, Pictures, Music and Videos, and never overwrites a file (a date-time suffix is added if the name already exists; an identical copy is deleted).
 - Every action is written to `journal.log` (next to the script, ignored by git).
 - On startup, the agent sorts files less than 7 days old that arrived while it was stopped. A file already processed (its name appears in the log) and not modified since is assumed to have been left in Downloads on purpose, and is not moved.
-- A Windows notification reports each file sent to `To_sort` and each error.
+- A Windows notification shows where each file went (or that it was a duplicate), each file sent to `To_sort` and each error.
 
 **Privacy**: your folder names, the names of some already sorted files and the beginning of downloaded files' content are sent to the Anthropic API to decide where files go.
 
