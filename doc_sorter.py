@@ -12,7 +12,8 @@ from watchdog.observers import Observer             # surveille un dossier
 from watchdog.events import FileSystemEventHandler  # réagit aux nouveaux fichiers
 
 # --- Configuration ---
-HOME = Path.home()                                  # C:\Users\<nom>
+UTILISATEUR = "Phil"                                # prénom utilisé dans le prompt : à adapter
+HOME = Path.home()                                  # ex : C:\Users\<nom>
 DL = HOME / "Downloads"                             # dossier surveillé
 A_TRIER = DL / "A_trier"                            # destination en cas de doute
 RACINES = [HOME / "Documents", HOME / "Pictures",   # seuls endroits autorisés (et leurs sous-dossiers)
@@ -67,7 +68,7 @@ def lister_dossiers() -> str:
             sous[:] = sorted(s for s in sous if not s.startswith("."))  # ignore les dossiers cachés
             if len(Path(chemin).relative_to(racine).parts) >= PROFONDEUR:
                 sous.clear()                                            # ne descend pas plus bas
-            dossiers.append(Path(chemin).relative_to(HOME).as_posix())  # ex : Documents/Travail/Client
+            dossiers.append(Path(chemin).relative_to(HOME).as_posix())  # ex : Documents/Banque/Relevés
     return "\n".join(dossiers[:500])                                    # limite pour rester rapide
 
 # --- Outil 2 : retrouver les fichiers proches déjà rangés ---
@@ -170,7 +171,7 @@ def deplacer(nom: str, destination: str, raison: str) -> str:
     shutil.move(src, cible)                                             # déplacement réel
     journal(f"RANGÉ   | {nom} -> {cible} | raison : {raison}")
     if dossier == A_TRIER:
-        notifier(f"À trier : {nom}", raison)                            # Phil doit décider lui-même
+        notifier(f"À trier : {nom}", raison)                            # l'utilisateur doit décider lui-même
     return "déplacé"
 
 # --- L'agent : l'IA décide (prompt structuré ROCIF) ---
@@ -180,9 +181,9 @@ def ranger(nom):
         model="claude-haiku-5-5", max_tokens=2000,                      # modèle rapide et peu cher
         tools=[lister_dossiers, chercher_similaires, lire_debut, deplacer],  # ses 4 outils
         messages=[{"role": "user", "content":
-            "RÔLE : Tu es l'assistant de rangement de fichiers de Phil.\n"
+            f"RÔLE : Tu es l'assistant de rangement de fichiers de {UTILISATEUR}.\n"
             f"OBJECTIF : Ranger le fichier téléchargé « {nom} » au bon endroit.\n"
-            "CONTEXTE : Phil classe ses fichiers par organisme ou projet (ex : Documents/Travail) "
+            f"CONTEXTE : {UTILISATEUR} classe ses fichiers par organisme ou projet (ex : Documents/Banque) "
             "avant de les classer par type. Les sous-dossiers précis sont toujours préférés aux dossiers génériques.\n"
             "INSTRUCTIONS :\n"
             "1. Liste les dossiers existants et cherche les fichiers au nom proche déjà rangés.\n"
