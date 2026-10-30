@@ -8,7 +8,7 @@ The reasons Claude gives (shown in the log and notifications) are written in the
 
 ## How it works
 
-- `doc_sorter.py` watches `~/Downloads` (watchdog). For each new file, a Claude agent (`claude-haiku-5-5`, via `tool_runner`) decides where to put it using 4 tools:
+- `doc_sorter.py` (the file to run) watches `~/Downloads` (watchdog). For each new file, a Claude agent (`claude-haiku-5-5`, via `tool_runner`) decides where to put it using 4 tools, defined in `tools.py`:
   - `list_folders`: existing folders under Documents, Pictures, Music, Videos (4 levels deep);
   - `find_similar`: already sorted files whose name shares at least 2 words with the new one (so a new version goes next to the old one);
   - `read_start`: beginning of the content (PDF, Word, Excel, PowerPoint, text; other binary files are not read). Images (resized to 1568 px) and the first page of scanned PDFs are sent as-is to Claude, which reads them;
@@ -40,7 +40,7 @@ Requirements: Windows 10/11, Python 3.10 or newer, an account on [console.anthro
    [Environment]::SetEnvironmentVariable("DOC_SORTER_API_KEY", "your-key", "User")
    ```
 
-3. Set `USER_NAME` (your first name) and `LANGUAGE` (language of the reasons, e.g. `"English"`) at the top of `doc_sorter.py`.
+3. Set `USER_NAME` (your first name) and `LANGUAGE` (language of the reasons, e.g. `"English"`) in `config.py`.
 
 4. Test it in the foreground (Ctrl + C to stop), in a new PowerShell window so the variable is picked up:
 
