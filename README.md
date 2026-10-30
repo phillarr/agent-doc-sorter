@@ -2,21 +2,21 @@
 
 AI agent that automatically sorts downloaded files on Windows.
 
-When a file lands in Downloads, the agent looks at your existing folders, reads the beginning of the file if needed, then moves it to the right place in Documents, Pictures, Music or Videos. When in doubt, it puts it in `Downloads\A_trier` ("to sort") and shows a notification.
+When a file lands in Downloads, the agent looks at your existing folders, reads the beginning of the file if needed, then moves it to the right place in Documents, Pictures, Music or Videos. When in doubt, it puts it in `Downloads\To_sort` and shows a notification.
 
-The prompt and the code comments are in English; variable names, log labels and the `A_trier` folder are in French; the reasons Claude gives (shown in the log and notifications) are written in the language set by `LANGUE`.
+The reasons Claude gives (shown in the log and notifications) are written in the language set by `LANGUAGE`.
 
 ## How it works
 
 - `doc_sorter.py` watches `~/Downloads` (watchdog). For each new file, a Claude agent (`claude-haiku-5-5`, via `tool_runner`) decides where to put it using 4 tools:
-  - `lister_dossiers`: existing folders under Documents, Pictures, Music, Videos (4 levels deep);
-  - `chercher_similaires`: already sorted files whose name shares at least 2 words with the new one (so a new version goes next to the old one);
-  - `lire_debut`: beginning of the content (PDF, Word, Excel, PowerPoint, text; other binary files are not read). Images (resized to 1568 px) and the first page of scanned PDFs are sent as-is to Claude, which reads them;
-  - `deplacer`: moves the file to an existing, allowed folder, or to `Downloads/A_trier` when in doubt.
+  - `list_folders`: existing folders under Documents, Pictures, Music, Videos (4 levels deep);
+  - `find_similar`: already sorted files whose name shares at least 2 words with the new one (so a new version goes next to the old one);
+  - `read_start`: beginning of the content (PDF, Word, Excel, PowerPoint, text; other binary files are not read). Images (resized to 1568 px) and the first page of scanned PDFs are sent as-is to Claude, which reads them;
+  - `move_file`: moves the file to an existing, allowed folder, or to `Downloads/To_sort` when in doubt.
 - Safeguards: the agent only touches files placed directly in Downloads, only moves them into existing folders under Documents, Pictures, Music and Videos, and never overwrites a file (a date-time suffix is added if the name already exists; an identical copy is deleted).
 - Every action is written to `journal.log` (next to the script, ignored by git).
 - On startup, the agent sorts files less than 7 days old that arrived while it was stopped. A file already processed (its name appears in the log) and not modified since is assumed to have been left in Downloads on purpose, and is not moved.
-- A Windows notification reports each file sent to `A_trier` and each error.
+- A Windows notification reports each file sent to `To_sort` and each error.
 
 **Privacy**: your folder names, the names of some already sorted files and the beginning of downloaded files' content are sent to the Anthropic API to decide where files go.
 
@@ -38,7 +38,7 @@ Requirements: Windows 10/11, Python 3.10 or newer, an account on [console.anthro
    [Environment]::SetEnvironmentVariable("DOC_SORTER_API_KEY", "your-key", "User")
    ```
 
-3. Set `UTILISATEUR` (your first name) and `LANGUE` (language of the reasons, e.g. `"English"`) at the top of `doc_sorter.py`.
+3. Set `USER_NAME` (your first name) and `LANGUAGE` (language of the reasons, e.g. `"English"`) at the top of `doc_sorter.py`.
 
 4. Test it in the foreground (Ctrl + C to stop), in a new PowerShell window so the variable is picked up:
 
@@ -67,7 +67,7 @@ explorer.exe "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\agent-d
 
 The `pythonw` filter avoids stopping another program if the ID has been reused. Going through `explorer.exe` ensures the agent inherits the `DOC_SORTER_API_KEY` user variable.
 
-Then check in `journal.log` that a recent `DÉMARRAGE` (startup) line appears, and that a test file is `RANGÉ` (sorted). An authentication error only shows up on the first file.
+Then check in `journal.log` that a recent `STARTUP` line appears, and that a test file is `SORTED`. An authentication error only shows up on the first file.
 
 ## License
 

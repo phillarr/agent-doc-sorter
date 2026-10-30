@@ -12,179 +12,179 @@ from watchdog.observers import Observer             # watches a folder
 from watchdog.events import FileSystemEventHandler  # reacts to new files
 
 # --- Configuration ---
-UTILISATEUR = "Phil"                                # first name used in the prompt: change it
-LANGUE = "French"                                   # language of the reasons (log, notifications): change it
+USER_NAME = "Phil"                                  # first name used in the prompt: change it
+LANGUAGE = "French"                                 # language of the reasons (log, notifications): change it
 HOME = Path.home()                                  # e.g. C:\Users\<name>
 DL = HOME / "Downloads"                             # watched folder
-A_TRIER = DL / "A_trier"                            # destination when in doubt
-RACINES = [HOME / "Documents", HOME / "Pictures",   # only allowed places (and their subfolders)
-           HOME / "Music", HOME / "Videos"]
-JOURNAL = Path(__file__).parent / "journal.log"     # log file, next to the script
-RATTRAPAGE_JOURS = 7                                # on startup, sorts files less than 7 days old
+TO_SORT = DL / "To_sort"                            # destination when in doubt
+ROOTS = [HOME / "Documents", HOME / "Pictures",     # only allowed places (and their subfolders)
+         HOME / "Music", HOME / "Videos"]
+LOG = Path(__file__).parent / "journal.log"         # log file, next to the script
+CATCHUP_DAYS = 7                                    # on startup, sorts files less than 7 days old
 PID = Path(__file__).parent / "agent.pid"           # process ID, to stop only this agent
-PROFONDEUR = 4                                      # subfolder levels shown to the AI (Documents/Work/Client/Project/2026)
+DEPTH = 4                                           # subfolder levels shown to the AI (Documents/Work/Client/Project/2026)
 IMAGES = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff")  # shown to the AI, which can read them
 
 # --- Log: written to the screen AND to the file ---
-def journal(message):
-    ligne = f"{datetime.now():%Y-%m-%d %H:%M:%S} | {message}"
-    print(ligne)
-    with open(JOURNAL, "a", encoding="utf-8") as f:                    # "a" = append without erasing
-        f.write(ligne + "\n")
+def log(message):
+    line = f"{datetime.now():%Y-%m-%d %H:%M:%S} | {message}"
+    print(line)
+    with open(LOG, "a", encoding="utf-8") as f:                        # "a" = append without erasing
+        f.write(line + "\n")
 
 # --- Windows notification: warns when a file is not sorted ---
 TOAST = (
     "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null;"
     "$x = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02);"
     "$t = $x.GetElementsByTagName('text');"
-    "$t.Item(0).AppendChild($x.CreateTextNode($env:TOAST_TITRE)) | Out-Null;"
-    "$t.Item(1).AppendChild($x.CreateTextNode($env:TOAST_TEXTE)) | Out-Null;"
+    "$t.Item(0).AppendChild($x.CreateTextNode($env:TOAST_TITLE)) | Out-Null;"
+    "$t.Item(1).AppendChild($x.CreateTextNode($env:TOAST_TEXT)) | Out-Null;"
     "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("
     "'{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe')"
     ".Show([Windows.UI.Notifications.ToastNotification]::new($x))")
 
-def notifier(titre, texte):
+def notify(title, text):
     try:                                                                # texts passed as variables: no injection through a file name
         subprocess.Popen(["powershell.exe", "-NoProfile", "-Command", TOAST],
-                         env={**os.environ, "TOAST_TITRE": titre, "TOAST_TEXTE": texte},
+                         env={**os.environ, "TOAST_TITLE": title, "TOAST_TEXT": text},
                          creationflags=subprocess.CREATE_NO_WINDOW)     # no window, no waiting
     except Exception as e:
-        journal(f"  notification impossible : {e}")
+        log(f"  notification failed: {e}")
 
 # --- Security: the AI can only touch files placed directly in Downloads ---
-def dans_telechargements(nom):
-    f = (DL / nom).resolve()
+def in_downloads(name):
+    f = (DL / name).resolve()
     if f.parent != DL.resolve() or not f.is_file():                     # blocks "../Documents/..." and folders
-        journal(f"  refusé : {nom} (hors Téléchargements)")
+        log(f"  refused: {name} (outside Downloads)")
         return None
     return f
 
 # --- Tool 1: see the existing folders ---
 @beta_tool
-def lister_dossiers() -> str:
+def list_folders() -> str:
     """Lists the existing folders and subfolders where a file can be sorted."""
-    dossiers = []
-    for racine in RACINES:
-        for chemin, sous, _ in os.walk(racine):
-            sous[:] = sorted(s for s in sous if not s.startswith("."))  # skips hidden folders
-            if len(Path(chemin).relative_to(racine).parts) >= PROFONDEUR:
-                sous.clear()                                            # does not go deeper
-            dossiers.append(Path(chemin).relative_to(HOME).as_posix())  # e.g. Documents/Bank/Statements
-    return "\n".join(dossiers[:500])                                    # capped to stay fast
+    folders = []
+    for root in ROOTS:
+        for dirpath, subdirs, _ in os.walk(root):
+            subdirs[:] = sorted(s for s in subdirs if not s.startswith("."))  # skips hidden folders
+            if len(Path(dirpath).relative_to(root).parts) >= DEPTH:
+                subdirs.clear()                                         # does not go deeper
+            folders.append(Path(dirpath).relative_to(HOME).as_posix())  # e.g. Documents/Bank/Statements
+    return "\n".join(folders[:500])                                     # capped to stay fast
 
 # --- Tool 2: find similar files already sorted ---
 @beta_tool
-def chercher_similaires(nom: str) -> str:
+def find_similar(name: str) -> str:
     """Searches the sorted folders for files whose name resembles this one (same subject, another version, same series).
     A similar file already sorted often points to the right folder."""
-    mots = {m for m in re.split(r"[\W_]+", Path(nom).stem.lower())     # words of the name, accents included
-            if len(m) >= 4 and not m.isdigit()}                         # skips "ia", "(1)", "2026"…
-    if not mots:
-        return "Nom trop court pour chercher des fichiers proches"
-    trouves = []
-    for racine in RACINES:
-        for chemin, sous, fichiers in os.walk(racine):
-            sous[:] = [s for s in sous if not s.startswith(".")]
-            for f in fichiers:
-                communs = mots & set(re.split(r"[\W_]+", Path(f).stem.lower()))
-                if len(communs) >= min(2, len(mots)):                   # at least 2 words in common
-                    trouves.append((len(communs), (Path(chemin) / f).relative_to(HOME).as_posix()))
-    if not trouves:
-        return "Aucun fichier proche déjà rangé"
-    trouves.sort(reverse=True)                                          # most similar first
-    return "\n".join(f"{chemin} ({n} mots communs)" for n, chemin in trouves[:10])
+    words = {w for w in re.split(r"[\W_]+", Path(name).stem.lower())   # words of the name, accents included
+             if len(w) >= 4 and not w.isdigit()}                        # skips "ia", "(1)", "2026"…
+    if not words:
+        return "Name too short to search for similar files"
+    found = []
+    for root in ROOTS:
+        for dirpath, subdirs, files in os.walk(root):
+            subdirs[:] = [s for s in subdirs if not s.startswith(".")]
+            for f in files:
+                common = words & set(re.split(r"[\W_]+", Path(f).stem.lower()))
+                if len(common) >= min(2, len(words)):                   # at least 2 words in common
+                    found.append((len(common), (Path(dirpath) / f).relative_to(HOME).as_posix()))
+    if not found:
+        return "No similar file already sorted"
+    found.sort(reverse=True)                                            # most similar first
+    return "\n".join(f"{path} ({n} words in common)" for n, path in found[:10])
 
 # --- Tool 3: read the beginning of a file ---
 @beta_tool
-def lire_debut(nom: str) -> str | list:
+def read_start(name: str) -> str | list:
     """Reads the beginning of a PDF, Word, Excel, PowerPoint, text or image file from the Downloads folder.
     For an image or a scanned PDF, returns the image of the first page."""
-    f = dans_telechargements(nom)
+    f = in_downloads(name)
     if not f:
-        return "Fichier introuvable dans Téléchargements"
+        return "File not found in Downloads"
     ext = f.suffix.lower()
     try:
         if ext == ".pdf":
             pdf = PdfReader(f)
-            texte = pdf.pages[0].extract_text() or ""                   # first page
-            if len(texte.strip()) < 20:                                 # no text: scanned PDF
+            text = pdf.pages[0].extract_text() or ""                    # first page
+            if len(text.strip()) < 20:                                  # no text: scanned PDF
                 page = PdfWriter(); page.add_page(pdf.pages[0])         # first page only, to limit cost
-                tampon = io.BytesIO(); page.write(tampon)
-                journal(f"  {nom} : PDF scanné, 1re page envoyée à l'IA")
+                buffer = io.BytesIO(); page.write(buffer)
+                log(f"  {name}: scanned PDF, first page sent to the AI")
                 return [{"type": "document", "source": {"type": "base64", "media_type": "application/pdf",
-                         "data": base64.standard_b64encode(tampon.getvalue()).decode()}},
-                        {"type": "text", "text": "PDF scanné : voici sa 1re page."}]
+                         "data": base64.standard_b64encode(buffer.getvalue()).decode()}},
+                        {"type": "text", "text": "Scanned PDF: here is its first page."}]
         elif ext in IMAGES:
             img = Image.open(f); img.seek(0)                            # first frame of an animated GIF or multipage TIFF
             img = img.convert("RGB"); img.thumbnail((1568, 1568))       # shrunk: fewer tokens, still readable
-            tampon = io.BytesIO(); img.save(tampon, "JPEG", quality=85)
-            journal(f"  {nom} : image envoyée à l'IA")
+            buffer = io.BytesIO(); img.save(buffer, "JPEG", quality=85)
+            log(f"  {name}: image sent to the AI")
             return [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
-                     "data": base64.standard_b64encode(tampon.getvalue()).decode()}},
-                    {"type": "text", "text": "Voici l'image."}]
+                     "data": base64.standard_b64encode(buffer.getvalue()).decode()}},
+                    {"type": "text", "text": "Here is the image."}]
         elif ext == ".docx":
-            texte = "\n".join(p.text for p in Document(f).paragraphs)   # paragraphs
+            text = "\n".join(p.text for p in Document(f).paragraphs)    # paragraphs
         elif ext in (".xlsx", ".xlsm"):
-            feuille = load_workbook(f, read_only=True, data_only=True).active
-            texte = "\n".join(" | ".join(str(c) for c in row if c is not None)
-                              for row in feuille.iter_rows(max_row=20, values_only=True))  # 20 rows
+            sheet = load_workbook(f, read_only=True, data_only=True).active
+            text = "\n".join(" | ".join(str(c) for c in row if c is not None)
+                             for row in sheet.iter_rows(max_row=20, values_only=True))  # 20 rows
         elif ext == ".pptx":
-            texte = "\n".join(forme.text_frame.text                     # slide text, in order
-                              for diapo in Presentation(f).slides
-                              for forme in diapo.shapes if forme.has_text_frame)
+            text = "\n".join(shape.text_frame.text                      # slide text, in order
+                             for slide in Presentation(f).slides
+                             for shape in slide.shapes if shape.has_text_frame)
         else:
             with open(f, "rb") as h:
-                debut = h.read(8000)                                    # 8 KB only, even for a 2 GB video
-            if b"\x00" in debut:                                        # null bytes = binary (image, program, archive…)
-                journal(f"  {nom} : fichier binaire, non lu")
-                return "Fichier binaire (image, programme, archive…) : contenu illisible, décide d'après le nom."
-            texte = debut.decode("utf-8", errors="ignore")              # plain text
-        journal(f"  lecture du contenu de {nom}")
-        return texte[:1500]                                             # 1500 characters max
+                head = h.read(8000)                                     # 8 KB only, even for a 2 GB video
+            if b"\x00" in head:                                         # null bytes = binary (image, program, archive…)
+                log(f"  {name}: binary file, not read")
+                return "Binary file (image, program, archive…): content unreadable, decide from the name."
+            text = head.decode("utf-8", errors="ignore")                # plain text
+        log(f"  reading the content of {name}")
+        return text[:1500]                                              # 1500 characters max
     except Exception as e:
-        return f"Illisible : {e}"
+        return f"Unreadable: {e}"
 
 # --- Tool 4: move a file ---
 @beta_tool
-def deplacer(nom: str, destination: str, raison: str) -> str:
-    """Moves a file to an existing folder (path as given by lister_dossiers) or to 'A_trier'.
-    raison: explain in one short sentence why you chose this folder."""
-    src = dans_telechargements(nom)
+def move_file(name: str, destination: str, reason: str) -> str:
+    """Moves a file to an existing folder (path as given by list_folders) or to 'To_sort'.
+    reason: explain in one short sentence why you chose this folder."""
+    src = in_downloads(name)
     if not src:                                                         # already moved or outside Downloads
-        return "Fichier introuvable dans Téléchargements"
-    nom = src.name
-    if destination == "A_trier":
-        dossier = A_TRIER
-        dossier.mkdir(exist_ok=True)                                    # the only folder it can create
+        return "File not found in Downloads"
+    name = src.name
+    if destination == "To_sort":
+        folder = TO_SORT
+        folder.mkdir(exist_ok=True)                                     # the only folder it can create
     else:
-        dossier = (HOME / destination).resolve()
-        autorise = any(dossier == r or r in dossier.parents for r in RACINES)
-        if not autorise or not dossier.is_dir():                        # security: existing and allowed only
-            journal(f"  refusé : {destination}")
-            return "Destination non autorisée ou inexistante, choisis-en une de la liste"
-    cible = dossier / nom
-    if cible.is_file() and filecmp.cmp(src, cible, shallow=False):      # same name AND same content, byte by byte
+        folder = (HOME / destination).resolve()
+        allowed = any(folder == r or r in folder.parents for r in ROOTS)
+        if not allowed or not folder.is_dir():                          # security: existing and allowed only
+            log(f"  refused: {destination}")
+            return "Destination not allowed or missing, pick one from the list"
+    target = folder / name
+    if target.is_file() and filecmp.cmp(src, target, shallow=False):    # same name AND same content, byte by byte
         src.unlink()                                                    # useless copy: the original is already sorted
-        journal(f"DOUBLON | {nom} déjà présent dans {dossier} (identique) -> copie téléchargée supprimée")
-        return "déjà présent à l'identique, copie supprimée"
-    if cible.exists():                                                  # same name, different content: avoid overwriting
-        cible = dossier / f"{src.stem}_{datetime.now():%Y-%m-%d_%H%M%S}{src.suffix}"
-    shutil.move(src, cible)                                             # actual move
-    journal(f"RANGÉ   | {nom} -> {cible} | raison : {raison}")
-    if dossier == A_TRIER:
-        notifier(f"À trier : {nom}", raison)                            # the user has to decide
-    return "déplacé"
+        log(f"DUPLICATE | {name} already in {folder} (identical) -> downloaded copy deleted")
+        return "already there, identical: copy deleted"
+    if target.exists():                                                 # same name, different content: avoid overwriting
+        target = folder / f"{src.stem}_{datetime.now():%Y-%m-%d_%H%M%S}{src.suffix}"
+    shutil.move(src, target)                                            # actual move
+    log(f"SORTED | {name} -> {target} | reason: {reason}")
+    if folder == TO_SORT:
+        notify(f"To sort: {name}", reason)                              # the user has to decide
+    return "moved"
 
 # --- The agent: the AI decides (ROCIF structured prompt) ---
-def ranger(nom):
-    journal(f"NOUVEAU | {nom}")
-    fin = anthropic.Anthropic(api_key=os.environ["DOC_SORTER_API_KEY"]).beta.messages.tool_runner(  # key dedicated to this agent
+def sort_file(name):
+    log(f"NEW | {name}")
+    result = anthropic.Anthropic(api_key=os.environ["DOC_SORTER_API_KEY"]).beta.messages.tool_runner(  # key dedicated to this agent
         model="claude-haiku-5-5", max_tokens=2000,                      # fast, cheap model
-        tools=[lister_dossiers, chercher_similaires, lire_debut, deplacer],  # its 4 tools
+        tools=[list_folders, find_similar, read_start, move_file],      # its 4 tools
         messages=[{"role": "user", "content":
-            f"ROLE: You are {UTILISATEUR}'s file sorting assistant.\n"
-            f"OBJECTIVE: Move the downloaded file \"{nom}\" to the right place.\n"
-            f"CONTEXT: {UTILISATEUR} organizes files by organization or project (e.g. Documents/Bank) "
+            f"ROLE: You are {USER_NAME}'s file sorting assistant.\n"
+            f"OBJECTIVE: Move the downloaded file \"{name}\" to the right place.\n"
+            f"CONTEXT: {USER_NAME} organizes files by organization or project (e.g. Documents/Bank) "
             "before organizing them by type. Specific subfolders are always preferred over generic folders.\n"
             "INSTRUCTIONS:\n"
             "1. List the existing folders and search for already sorted files with a similar name.\n"
@@ -192,30 +192,30 @@ def ranger(nom):
             "3. Otherwise, if the name is not enough, read the beginning of the file.\n"
             "4. Put it in the most specific existing folder.\n"
             "5. If there is no folder for the organization or project, use a folder by document type "
-            "if one exists (e.g. Documents/Invoices for an invoice). Put it in A_trier only if no "
+            "if one exists (e.g. Documents/Invoices for an invoice). Put it in To_sort only if no "
             "folder fits, not even by type. Never guess.\n"
-            f"FORMAT: A single move action, with a one-sentence reason written in {LANGUE}."}]
+            f"FORMAT: A single move action, with a one-sentence reason written in {LANGUAGE}."}]
     ).until_done()                                                      # runs until the end
-    if (DL / nom).exists():                                             # the AI stopped without moving the file
-        texte = " ".join(b.text for b in fin.content if b.type == "text").replace("\n", " ")
-        journal(f"NON RANGÉ | {nom} | arrêt : {fin.stop_reason} | réponse : {texte[:300]}")
-        deplacer(nom, "A_trier", "l'IA n'a pas choisi de dossier")      # safety net
+    if (DL / name).exists():                                            # the AI stopped without moving the file
+        text = " ".join(b.text for b in result.content if b.type == "text").replace("\n", " ")
+        log(f"NOT SORTED | {name} | stop: {result.stop_reason} | answer: {text[:300]}")
+        move_file(name, "To_sort", "the AI did not choose a folder")    # safety net
 
 # --- Waits until the file is fully written (stable size) ---
-def attendre_fin(p, max_secondes=600):
-    taille = -1
-    for _ in range(max_secondes):
+def wait_until_written(p, max_seconds=600):
+    size = -1
+    for _ in range(max_seconds):
         time.sleep(1)
         if not p.is_file():
             return False                                                # disappeared in the meantime
         if (DL / (p.name + ".part")).exists():                          # Firefox: empty file + .part in progress
             return False                                                # we'll be called again when the .part is renamed
-        nouvelle = p.stat().st_size
-        if nouvelle == taille:
+        new_size = p.stat().st_size
+        if new_size == size:
             return True                                                 # 2 identical readings: download finished
-        taille = nouvelle
-    journal(f"ERREUR  | {p.name} | taille encore instable après {max_secondes} s")
-    notifier(f"Erreur : {p.name}", "Téléchargement jamais terminé, fichier non rangé")
+        size = new_size
+    log(f"ERROR | {p.name} | size still changing after {max_seconds} s")
+    notify(f"Error: {p.name}", "Download never finished, file not sorted")
     return False
 
 # --- The trigger ---
@@ -226,38 +226,39 @@ class Handler(FileSystemEventHandler):
         p = Path(p)
         try:
             if p.parent == DL and p.suffix.lower() not in (".crdownload", ".tmp", ".part"):  # skips downloads in progress
-                if attendre_fin(p):
-                    ranger(p.name)                                      # runs the agent
+                if wait_until_written(p):
+                    sort_file(p.name)                                   # runs the agent
         except Exception as e:
-            journal(f"ERREUR  | {p.name} | {e}")                        # errors go to the log too
-            notifier(f"Erreur : {p.name}", str(e)[:200])                # e.g. expired API key
+            log(f"ERROR | {p.name} | {e}")                              # errors go to the log too
+            notify(f"Error: {p.name}", str(e)[:200])                    # e.g. expired API key
 
 # --- Startup ---
 obs = Observer(); obs.schedule(Handler(), str(DL)); obs.start()         # watches Downloads
 PID.write_text(str(os.getpid()))                                        # allows a targeted stop
-journal(f"DÉMARRAGE | surveillance de {DL} | PID {os.getpid()}")
+log(f"STARTUP | watching {DL} | PID {os.getpid()}")
 
 # --- Catch-up: files that arrived while the agent was stopped ---
-def deja_vus():
+def already_seen():
     """Last time the agent processed each file name, according to the log."""
-    vus = {}
-    if JOURNAL.exists():
-        for ligne in JOURNAL.read_text(encoding="utf-8", errors="ignore").splitlines():
-            date, _, reste = ligne.partition(" | ")
-            if reste.startswith("NOUVEAU | "):
+    seen = {}
+    if LOG.exists():
+        for line in LOG.read_text(encoding="utf-8", errors="ignore").splitlines():
+            date, _, rest = line.partition(" | ")
+            label, _, name = rest.partition(" | ")
+            if label in ("NEW", "NOUVEAU"):                             # NOUVEAU: lines written before the English version
                 try:
-                    vus[reste[10:]] = datetime.strptime(date, "%Y-%m-%d %H:%M:%S").timestamp()
+                    seen[name] = datetime.strptime(date, "%Y-%m-%d %H:%M:%S").timestamp()
                 except ValueError:
                     pass                                                # damaged line: skipped
-    return vus
+    return seen
 
-limite = time.time() - RATTRAPAGE_JOURS * 86400
-vus = deja_vus()
-recents = [p for p in sorted(DL.iterdir()) if p.is_file() and p.stat().st_mtime > limite]
-en_attente = [p for p in recents if p.stat().st_mtime > vus.get(p.name, 0)]  # already processed and unchanged since: left on purpose
-journal(f"RATTRAPAGE | {len(en_attente)} fichier(s) de moins de {RATTRAPAGE_JOURS} jours"
-        f" ({len(recents) - len(en_attente)} déjà traité(s), laissé(s) en place)")
-for p in en_attente:
+cutoff = time.time() - CATCHUP_DAYS * 86400
+seen = already_seen()
+recent = [p for p in sorted(DL.iterdir()) if p.is_file() and p.stat().st_mtime > cutoff]
+pending = [p for p in recent if p.stat().st_mtime > seen.get(p.name, 0)]  # already processed and unchanged since: left on purpose
+log(f"CATCH-UP | {len(pending)} file(s) less than {CATCHUP_DAYS} days old"
+    f" ({len(recent) - len(pending)} already processed, left in place)")
+for p in pending:
     Handler().check(p)                                                  # same filters as a new download
 
 while True: time.sleep(1)                                               # Ctrl + C to stop
