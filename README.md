@@ -9,7 +9,7 @@ Agent qui range automatiquement les fichiers téléchargés.
   - `lire_debut` : début du contenu (PDF, Word, Excel, PowerPoint, texte ; les fichiers binaires ne sont pas lus) ;
   - `deplacer` : déplace vers un dossier existant et autorisé, ou vers `Downloads/A_trier` en cas de doute.
 - Chaque action est écrite dans `journal.log` (à côté du script, ignoré par git).
-- Dépendances : `anthropic`, `watchdog`, `pypdf`, `python-docx`, `openpyxl`, `python-pptx`. La clé `ANTHROPIC_API_KEY` doit être définie dans l'environnement.
+- Dépendances : `anthropic`, `watchdog`, `pypdf`, `python-docx`, `openpyxl`, `python-pptx`. La clé API est lue dans la variable d'environnement Utilisateur `DOC_SORTER_API_KEY` (clé « agent-doc-sorter » dans la console Anthropic, distincte de celle des autres agents).
 
 ## Exécution en arrière-plan
 
@@ -28,6 +28,6 @@ Get-Process -Id (Get-Content C:\Users\<nom>\agent-doc-sorter\agent.pid) -ErrorAc
 explorer.exe "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\agent-doc-sorter.bat"
 ```
 
-Le filtre `pythonw` évite d'arrêter un autre programme si le numéro a été réattribué. Passer par `explorer.exe` garantit que l'agent hérite de la variable utilisateur `ANTHROPIC_API_KEY`.
+Le filtre `pythonw` évite d'arrêter un autre programme si le numéro a été réattribué. Passer par `explorer.exe` garantit que l'agent hérite de la variable utilisateur `DOC_SORTER_API_KEY`.
 
 Vérifier ensuite dans `journal.log` qu'une ligne `DÉMARRAGE` récente apparaît, puis qu'un fichier test est bien `RANGÉ` (une erreur d'authentification n'apparaît qu'au premier fichier).

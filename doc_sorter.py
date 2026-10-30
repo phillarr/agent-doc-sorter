@@ -115,7 +115,7 @@ def deplacer(nom: str, destination: str, raison: str) -> str:
 # --- L'agent : l'IA décide (prompt structuré ROCIF) ---
 def ranger(nom):
     journal(f"NOUVEAU | {nom}")
-    fin = anthropic.Anthropic().beta.messages.tool_runner(
+    fin = anthropic.Anthropic(api_key=os.environ["DOC_SORTER_API_KEY"]).beta.messages.tool_runner(  # clé propre à cet agent
         model="claude-haiku-5-5", max_tokens=2000,                      # modèle rapide et peu cher
         tools=[lister_dossiers, lire_debut, deplacer],                  # ses 3 outils
         messages=[{"role": "user", "content":
