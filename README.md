@@ -1,28 +1,30 @@
 # agent-doc-sorter
 
-Agent IA qui range automatiquement les fichiers téléchargés sous Windows.
+AI agent that automatically sorts downloaded files on Windows.
 
-Un fichier arrive dans Téléchargements : l'agent regarde les dossiers existants, lit le début du fichier si besoin, puis le déplace au bon endroit dans Documents, Images, Musique ou Vidéos. En cas de doute, il le met dans `Téléchargements\A_trier` et prévient par une notification.
+When a file lands in Downloads, the agent looks at your existing folders, reads the beginning of the file if needed, then moves it to the right place in Documents, Pictures, Music or Videos. When in doubt, it puts it in `Downloads\A_trier` ("to sort") and shows a notification.
 
-## Fonctionnement
+The prompt, the log and the notifications are in French.
 
-- `doc_sorter.py` surveille `~/Downloads` (watchdog). À chaque nouveau fichier, un agent Claude (`claude-haiku-5-5`, via `tool_runner`) choisit où le ranger grâce à 4 outils :
-  - `lister_dossiers` : dossiers existants sous Documents, Pictures, Music, Videos (4 niveaux) ;
-  - `chercher_similaires` : fichiers déjà rangés dont le nom partage au moins 2 mots avec le nouveau (pour ranger une nouvelle version à côté de l'ancienne) ;
-  - `lire_debut` : début du contenu (PDF, Word, Excel, PowerPoint, texte ; les autres fichiers binaires ne sont pas lus). Les images (réduites à 1568 px) et la 1re page des PDF scannés sont envoyées telles quelles à Claude, qui les lit ;
-  - `deplacer` : déplace vers un dossier existant et autorisé, ou vers `Downloads/A_trier` en cas de doute.
-- Garde-fous : l'agent ne touche qu'aux fichiers posés directement dans Téléchargements, ne range que dans des dossiers existants sous Documents, Pictures, Music et Videos, et n'écrase jamais un fichier (suffixe date-heure si le nom existe déjà ; une copie identique est supprimée).
-- Chaque action est écrite dans `journal.log` (à côté du script, ignoré par git).
-- Au démarrage, l'agent range les fichiers de moins de 7 jours arrivés pendant qu'il était arrêté. Un fichier déjà traité (son nom figure dans le journal) et non modifié depuis est considéré comme laissé exprès dans Téléchargements, et n'est pas déplacé.
-- Une notification Windows signale chaque fichier envoyé dans `A_trier` et chaque erreur.
+## How it works
 
-**Confidentialité** : les noms de vos dossiers, de quelques fichiers déjà rangés et le début du contenu des fichiers téléchargés sont envoyés à l'API Anthropic pour décider du rangement.
+- `doc_sorter.py` watches `~/Downloads` (watchdog). For each new file, a Claude agent (`claude-haiku-5-5`, via `tool_runner`) decides where to put it using 4 tools:
+  - `lister_dossiers`: existing folders under Documents, Pictures, Music, Videos (4 levels deep);
+  - `chercher_similaires`: already sorted files whose name shares at least 2 words with the new one (so a new version goes next to the old one);
+  - `lire_debut`: beginning of the content (PDF, Word, Excel, PowerPoint, text; other binary files are not read). Images (resized to 1568 px) and the first page of scanned PDFs are sent as-is to Claude, which reads them;
+  - `deplacer`: moves the file to an existing, allowed folder, or to `Downloads/A_trier` when in doubt.
+- Safeguards: the agent only touches files placed directly in Downloads, only moves them into existing folders under Documents, Pictures, Music and Videos, and never overwrites a file (a date-time suffix is added if the name already exists; an identical copy is deleted).
+- Every action is written to `journal.log` (next to the script, ignored by git).
+- On startup, the agent sorts files less than 7 days old that arrived while it was stopped. A file already processed (its name appears in the log) and not modified since is assumed to have been left in Downloads on purpose, and is not moved.
+- A Windows notification reports each file sent to `A_trier` and each error.
+
+**Privacy**: your folder names, the names of some already sorted files and the beginning of downloaded files' content are sent to the Anthropic API to decide where files go.
 
 ## Installation
 
-Prérequis : Windows 10/11, Python 3.10 ou plus récent, un compte sur [console.anthropic.com](https://console.anthropic.com) (l'API est facturée à l'usage, séparément d'un abonnement Claude).
+Requirements: Windows 10/11, Python 3.10 or newer, an account on [console.anthropic.com](https://console.anthropic.com) (the API is billed per use, separately from any Claude subscription).
 
-1. Cloner le dépôt et installer les dépendances :
+1. Clone the repository and install the dependencies:
 
    ```powershell
    git clone https://github.com/phillarr/agent-doc-sorter.git $HOME\agent-doc-sorter
@@ -30,43 +32,43 @@ Prérequis : Windows 10/11, Python 3.10 ou plus récent, un compte sur [console.
    pip install -r requirements.txt
    ```
 
-2. Créer une clé API sur la console Anthropic (Settings → API Keys), puis l'enregistrer comme variable d'environnement Utilisateur, dans PowerShell :
+2. Create an API key in the Anthropic console (Settings → API Keys), then save it as a User environment variable, in PowerShell:
 
    ```powershell
-   [Environment]::SetEnvironmentVariable("DOC_SORTER_API_KEY", "votre-clé", "User")
+   [Environment]::SetEnvironmentVariable("DOC_SORTER_API_KEY", "your-key", "User")
    ```
 
-3. Adapter `UTILISATEUR` (votre prénom) en haut de `doc_sorter.py`.
+3. Set `UTILISATEUR` (your first name) at the top of `doc_sorter.py`.
 
-4. Tester au premier plan (Ctrl + C pour arrêter), dans une nouvelle fenêtre PowerShell pour que la variable soit prise en compte :
+4. Test it in the foreground (Ctrl + C to stop), in a new PowerShell window so the variable is picked up:
 
    ```powershell
    python $HOME\agent-doc-sorter\doc_sorter.py
    ```
 
-5. Lancer l'agent au démarrage de Windows : créer le fichier `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\agent-doc-sorter.bat` contenant :
+5. Start the agent with Windows: create the file `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\agent-doc-sorter.bat` containing:
 
    ```bat
    start "" pyw "%USERPROFILE%\agent-doc-sorter\doc_sorter.py"
    ```
 
-   `pyw` lance Python sans fenêtre. S'il n'est pas installé, remplacer `pyw` par le chemin complet de `pythonw.exe`.
+   `pyw` runs Python without a window. If it is not installed, replace `pyw` with the full path to `pythonw.exe`.
 
-## Après chaque modification du code
+## After each code change
 
-Le processus en cours garde l'ancienne version : il faut l'arrêter puis le relancer.
+The running process keeps the old version: you need to stop it and start it again.
 
-Au démarrage, l'agent écrit son numéro de processus dans `agent.pid` (ignoré par git), ce qui permet de n'arrêter que lui :
+On startup, the agent writes its process ID to `agent.pid` (ignored by git), so you can stop only this process:
 
 ```powershell
 Get-Process -Id (Get-Content $HOME\agent-doc-sorter\agent.pid) -ErrorAction SilentlyContinue | Where-Object Name -eq pythonw | Stop-Process -Force
 explorer.exe "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\agent-doc-sorter.bat"
 ```
 
-Le filtre `pythonw` évite d'arrêter un autre programme si le numéro a été réattribué. Passer par `explorer.exe` garantit que l'agent hérite de la variable utilisateur `DOC_SORTER_API_KEY`.
+The `pythonw` filter avoids stopping another program if the ID has been reused. Going through `explorer.exe` ensures the agent inherits the `DOC_SORTER_API_KEY` user variable.
 
-Vérifier ensuite dans `journal.log` qu'une ligne `DÉMARRAGE` récente apparaît, puis qu'un fichier test est bien `RANGÉ` (une erreur d'authentification n'apparaît qu'au premier fichier).
+Then check in `journal.log` that a recent `DÉMARRAGE` (startup) line appears, and that a test file is `RANGÉ` (sorted). An authentication error only shows up on the first file.
 
-## Licence
+## License
 
-MIT, voir [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).
