@@ -1,11 +1,12 @@
 # --- Bibliothèques ---
-import os, time, shutil, anthropic                  # processus, temps, déplacement de fichiers, API Claude
+import os, time, shutil, filecmp, anthropic         # processus, temps, déplacement/comparaison de fichiers, API Claude
 from datetime import datetime                       # date et heure pour le journal
 from pathlib import Path                            # manipulation des chemins
 from anthropic import beta_tool                     # transforme une fonction Python en outil pour l'IA
 from pypdf import PdfReader                         # lecture des PDF
 from docx import Document                           # lecture des Word
 from openpyxl import load_workbook                  # lecture des Excel
+from pptx import Presentation                       # lecture des PowerPoint
 from watchdog.observers import Observer             # surveille un dossier
 from watchdog.events import FileSystemEventHandler  # réagit aux nouveaux fichiers
 
@@ -52,7 +53,7 @@ def lister_dossiers() -> str:
 # --- Outil 2 : lire le début d'un fichier ---
 @beta_tool
 def lire_debut(nom: str) -> str:
-    """Lit le début du contenu d'un fichier PDF, Word, Excel ou texte du dossier Téléchargements."""
+    """Lit le début du contenu d'un fichier PDF, Word, Excel, PowerPoint ou texte du dossier Téléchargements."""
     f = dans_telechargements(nom)
     if not f:
         return "Fichier introuvable dans Téléchargements"
@@ -66,8 +67,17 @@ def lire_debut(nom: str) -> str:
             feuille = load_workbook(f, read_only=True, data_only=True).active
             texte = "\n".join(" | ".join(str(c) for c in row if c is not None)
                               for row in feuille.iter_rows(max_row=20, values_only=True))  # 20 lignes
+        elif ext == ".pptx":
+            texte = "\n".join(forme.text_frame.text                     # texte des diapositives, dans l'ordre
+                              for diapo in Presentation(f).slides
+                              for forme in diapo.shapes if forme.has_text_frame)
         else:
-            texte = f.read_text(errors="ignore")                        # texte brut
+            with open(f, "rb") as h:
+                debut = h.read(8000)                                    # 8 Ko seulement, même pour une vidéo de 2 Go
+            if b"\x00" in debut:                                        # octets nuls = binaire (image, programme, archive…)
+                journal(f"  {nom} : fichier binaire, non lu")
+                return "Fichier binaire (image, programme, archive…) : contenu illisible, décide d'après le nom."
+            texte = debut.decode("utf-8", errors="ignore")              # texte brut
         journal(f"  lecture du contenu de {nom}")
         return texte[:1500]                                             # 1500 caractères max
     except Exception as e:
@@ -92,8 +102,12 @@ def deplacer(nom: str, destination: str, raison: str) -> str:
             journal(f"  refusé : {destination}")
             return "Destination non autorisée ou inexistante, choisis-en une de la liste"
     cible = dossier / nom
-    if cible.exists():                                                  # évite d'écraser
-        cible = dossier / f"{src.stem}_{int(time.time())}{src.suffix}"
+    if cible.is_file() and filecmp.cmp(src, cible, shallow=False):      # même nom ET même contenu, octet par octet
+        src.unlink()                                                    # copie inutile : l'original est déjà rangé
+        journal(f"DOUBLON | {nom} déjà présent dans {dossier} (identique) -> copie téléchargée supprimée")
+        return "déjà présent à l'identique, copie supprimée"
+    if cible.exists():                                                  # même nom, contenu différent : évite d'écraser
+        cible = dossier / f"{src.stem}_{datetime.now():%Y-%m-%d_%H%M%S}{src.suffix}"
     shutil.move(src, cible)                                             # déplacement réel
     journal(f"RANGÉ   | {nom} -> {cible} | raison : {raison}")
     return "déplacé"
