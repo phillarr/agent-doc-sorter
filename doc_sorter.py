@@ -20,6 +20,9 @@ TO_SORT = DL / "To_sort"                            # destination when in doubt
 ROOTS = [HOME / "Documents", HOME / "Pictures",     # only allowed places (and their subfolders)
          HOME / "Music", HOME / "Videos"]
 LOG = Path(__file__).parent / "journal.log"         # log file, next to the script
+LOG_OLD = Path(__file__).parent / "journal.old.log" # previous log, kept after rotation
+LOG_MAX = 1_000_000                                 # on startup, the log is rotated above 1 MB (about a year)
+INSTALLERS = (".exe", ".msi")                       # left in Downloads: they are usually run right away
 CATCHUP_DAYS = 7                                    # on startup, sorts files less than 7 days old
 PID = Path(__file__).parent / "agent.pid"           # process ID, to stop only this agent
 DEPTH = 4                                           # subfolder levels shown to the AI (Documents/Work/Client/Project/2026)
@@ -232,7 +235,9 @@ class Handler(FileSystemEventHandler):
         p = Path(p)
         try:
             if p.parent == DL and p.suffix.lower() not in (".crdownload", ".tmp", ".part"):  # skips downloads in progress
-                if wait_until_written(p):
+                if p.suffix.lower() in INSTALLERS:
+                    log(f"SKIPPED | {p.name} | installer, left in Downloads")  # no AI call: free
+                elif wait_until_written(p):
                     sort_file(p.name)                                   # runs the agent
         except Exception as e:
             log(f"ERROR | {p.name} | {e}")                              # errors go to the log too
@@ -256,8 +261,13 @@ if other := other_agent():
     log(f"ALREADY RUNNING | another agent is running (PID {other}), this one stops")
     raise SystemExit
 
+# --- Log rotation: keeps the log from growing forever ---
+if LOG.exists() and LOG.stat().st_size > LOG_MAX:
+    LOG.replace(LOG_OLD)                                                # the previous archive is overwritten
+    log(f"LOG ROTATED | previous log moved to {LOG_OLD.name}")
+
 # --- Startup ---
-obs =Observer(); obs.schedule(Handler(), str(DL)); obs.start()         # watches Downloads
+obs = Observer(); obs.schedule(Handler(), str(DL)); obs.start()         # watches Downloads
 PID.write_text(str(os.getpid()))                                        # allows a targeted stop
 log(f"STARTUP | watching {DL} | PID {os.getpid()}")
 
@@ -265,11 +275,15 @@ log(f"STARTUP | watching {DL} | PID {os.getpid()}")
 def already_seen():
     """Last time the agent processed each file name, according to the log."""
     seen = {}
-    if LOG.exists():
-        for line in LOG.read_text(encoding="utf-8", errors="ignore").splitlines():
+    for f in (LOG_OLD, LOG):                                            # archive first: the current log has the latest dates
+        if not f.exists():
+            continue
+        for line in f.read_text(encoding="utf-8", errors="ignore").splitlines():
             date, _, rest = line.partition(" | ")
             label, _, name = rest.partition(" | ")
-            if label in ("NEW", "NOUVEAU"):                             # NOUVEAU: lines written before the English version
+            if label in ("NEW", "SKIPPED", "NOUVEAU"):                  # NOUVEAU: lines written before the English version
+                if label == "SKIPPED":
+                    name = name.partition(" | ")[0]                     # "name | installer, left in Downloads"
                 try:
                     seen[name] = datetime.strptime(date, "%Y-%m-%d %H:%M:%S").timestamp()
                 except ValueError:
@@ -279,7 +293,7 @@ def already_seen():
 cutoff = time.time() - CATCHUP_DAYS * 86400
 seen = already_seen()
 recent = [p for p in sorted(DL.iterdir()) if p.is_file() and p.stat().st_mtime > cutoff]
-pending = [p for p in recent if p.stat().st_mtime > seen.get(p.name, 0)]  # already processed and unchanged since: left on purpose
+pending = [p for p in recent if int(p.stat().st_mtime) > seen.get(p.name, 0)]  # already processed and unchanged since: left on purpose (log is to the second)
 log(f"CATCH-UP | {len(pending)} file(s) less than {CATCHUP_DAYS} days old"
     f" ({len(recent) - len(pending)} already processed, left in place)")
 for p in pending:

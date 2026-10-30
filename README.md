@@ -14,7 +14,8 @@ The reasons Claude gives (shown in the log and notifications) are written in the
   - `read_start`: beginning of the content (PDF, Word, Excel, PowerPoint, text; other binary files are not read). Images (resized to 1568 px) and the first page of scanned PDFs are sent as-is to Claude, which reads them;
   - `move_file`: moves the file to an existing, allowed folder, or to `Downloads/To_sort` when in doubt.
 - Safeguards: the agent only touches files placed directly in Downloads, only moves them into existing folders under Documents, Pictures, Music and Videos, and never overwrites a file (a date-time suffix is added if the name already exists; an identical copy is deleted).
-- Every action is written to `journal.log` (next to the script, ignored by git).
+- Installers (`.exe`, `.msi`) are left in Downloads, without calling the AI: they are usually run right away.
+- Every action is written to `journal.log` (next to the script, ignored by git). On startup, a log larger than 1 MB is renamed `journal.old.log` (replacing the previous one) and a new log is started.
 - On startup, the agent sorts files less than 7 days old that arrived while it was stopped. A file already processed (its name appears in the log) and not modified since is assumed to have been left in Downloads on purpose, and is not moved.
 - A Windows notification shows where each file went (or that it was a duplicate), each file sent to `To_sort` and each error. Clicking it opens the folder (or the log, for an error).
 - Only one agent runs at a time: if another one is already running, a new instance writes `ALREADY RUNNING` to the log and stops.
