@@ -116,7 +116,7 @@ def deplacer(nom: str, destination: str, raison: str) -> str:
 def ranger(nom):
     journal(f"NOUVEAU | {nom}")
     fin = anthropic.Anthropic().beta.messages.tool_runner(
-        model="claude-haiku-5-5", max_tokens=800,                       # modèle rapide et peu cher
+        model="claude-haiku-5-5", max_tokens=2000,                      # modèle rapide et peu cher
         tools=[lister_dossiers, lire_debut, deplacer],                  # ses 3 outils
         messages=[{"role": "user", "content":
             "RÔLE : Tu es l'assistant de rangement de fichiers de Phil.\n"
