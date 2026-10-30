@@ -16,6 +16,7 @@ A_TRIER = DL / "A_trier"                            # destination en cas de dout
 RACINES = [HOME / "Documents", HOME / "Pictures",   # seuls endroits autorisés (et leurs sous-dossiers)
            HOME / "Music", HOME / "Videos"]
 JOURNAL = Path(__file__).parent / "journal.log"     # fichier de log, à côté du script
+RATTRAPAGE_JOURS = 7                                # au démarrage, range les fichiers de moins de 7 jours
 
 # --- Journal : écrit à l'écran ET dans le fichier ---
 def journal(message):
@@ -23,6 +24,14 @@ def journal(message):
     print(ligne)
     with open(JOURNAL, "a", encoding="utf-8") as f:                    # "a" = ajoute à la fin sans effacer
         f.write(ligne + "\n")
+
+# --- Sécurité : l'IA ne peut toucher qu'aux fichiers posés directement dans Téléchargements ---
+def dans_telechargements(nom):
+    f = (DL / nom).resolve()
+    if f.parent != DL.resolve() or not f.is_file():                     # bloque "../Documents/..." et les dossiers
+        journal(f"  refusé : {nom} (hors Téléchargements)")
+        return None
+    return f
 
 # --- Outil 1 : voir les dossiers existants ---
 @beta_tool
@@ -43,7 +52,9 @@ def lister_dossiers() -> str:
 @beta_tool
 def lire_debut(nom: str) -> str:
     """Lit le début du contenu d'un fichier PDF, Word, Excel ou texte du dossier Téléchargements."""
-    f = DL / nom
+    f = dans_telechargements(nom)
+    if not f:
+        return "Fichier introuvable dans Téléchargements"
     ext = f.suffix.lower()
     try:
         if ext == ".pdf":
@@ -66,9 +77,10 @@ def lire_debut(nom: str) -> str:
 def deplacer(nom: str, destination: str, raison: str) -> str:
     """Déplace un fichier vers un dossier existant (chemin tel que donné par lister_dossiers) ou vers 'A_trier'.
     raison : explique en une phrase courte pourquoi tu choisis ce dossier."""
-    src = DL / nom
-    if not src.exists():                                                # déjà déplacé ?
-        return "Fichier introuvable"
+    src = dans_telechargements(nom)
+    if not src:                                                         # déjà déplacé ou hors Téléchargements
+        return "Fichier introuvable dans Téléchargements"
+    nom = src.name
     if destination == "A_trier":
         dossier = A_TRIER
         dossier.mkdir(exist_ok=True)                                    # seul dossier qu'il peut créer
@@ -127,4 +139,12 @@ class Handler(FileSystemEventHandler):
 # --- Démarrage ---
 obs = Observer(); obs.schedule(Handler(), str(DL)); obs.start()         # surveille Downloads
 journal(f"DÉMARRAGE | surveillance de {DL}")
+
+# --- Rattrapage : fichiers arrivés pendant que l'agent était arrêté ---
+limite = time.time() - RATTRAPAGE_JOURS * 86400
+en_attente = [p for p in sorted(DL.iterdir()) if p.is_file() and p.stat().st_mtime > limite]
+journal(f"RATTRAPAGE | {len(en_attente)} fichier(s) de moins de {RATTRAPAGE_JOURS} jours")
+for p in en_attente:
+    Handler().check(p)                                                  # mêmes filtres qu'un nouveau téléchargement
+
 while True: time.sleep(1)                                               # Ctrl + C pour arrêter
