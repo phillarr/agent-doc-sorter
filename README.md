@@ -4,11 +4,13 @@ Agent qui range automatiquement les fichiers téléchargés.
 
 ## Fonctionnement
 
-- `doc_sorter.py` surveille `~/Downloads` (watchdog). À chaque nouveau fichier, un agent Claude (`claude-haiku-5-5`, via `tool_runner`) choisit où le ranger grâce à 3 outils :
-  - `lister_dossiers` : dossiers existants sous Documents, Pictures, Music, Videos (2 niveaux) ;
+- `doc_sorter.py` surveille `~/Downloads` (watchdog). À chaque nouveau fichier, un agent Claude (`claude-haiku-5-5`, via `tool_runner`) choisit où le ranger grâce à 4 outils :
+  - `lister_dossiers` : dossiers existants sous Documents, Pictures, Music, Videos (4 niveaux) ;
+  - `chercher_similaires` : fichiers déjà rangés dont le nom partage au moins 2 mots avec le nouveau (pour ranger une nouvelle version à côté de l'ancienne) ;
   - `lire_debut` : début du contenu (PDF, Word, Excel, PowerPoint, texte ; les fichiers binaires ne sont pas lus) ;
   - `deplacer` : déplace vers un dossier existant et autorisé, ou vers `Downloads/A_trier` en cas de doute.
 - Chaque action est écrite dans `journal.log` (à côté du script, ignoré par git).
+- Une notification Windows signale chaque fichier envoyé dans `A_trier` et chaque erreur.
 - Dépendances : `anthropic`, `watchdog`, `pypdf`, `python-docx`, `openpyxl`, `python-pptx`. La clé API est lue dans la variable d'environnement Utilisateur `DOC_SORTER_API_KEY` (clé « agent-doc-sorter » dans la console Anthropic, distincte de celle des autres agents).
 
 ## Exécution en arrière-plan

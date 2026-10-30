@@ -1,5 +1,5 @@
 # --- Bibliothèques ---
-import os, time, shutil, filecmp, anthropic         # processus, temps, déplacement/comparaison de fichiers, API Claude
+import os, re, time, shutil, filecmp, subprocess, anthropic  # processus, mots, temps, fichiers, notifications, API Claude
 from datetime import datetime                       # date et heure pour le journal
 from pathlib import Path                            # manipulation des chemins
 from anthropic import beta_tool                     # transforme une fonction Python en outil pour l'IA
@@ -19,6 +19,7 @@ RACINES = [HOME / "Documents", HOME / "Pictures",   # seuls endroits autorisés 
 JOURNAL = Path(__file__).parent / "journal.log"     # fichier de log, à côté du script
 RATTRAPAGE_JOURS = 7                                # au démarrage, range les fichiers de moins de 7 jours
 PID = Path(__file__).parent / "agent.pid"           # numéro du processus, pour n'arrêter que cet agent
+PROFONDEUR = 4                                      # niveaux de sous-dossiers montrés à l'IA (Documents/Travail/Client/Projet/2026)
 
 # --- Journal : écrit à l'écran ET dans le fichier ---
 def journal(message):
@@ -26,6 +27,25 @@ def journal(message):
     print(ligne)
     with open(JOURNAL, "a", encoding="utf-8") as f:                    # "a" = ajoute à la fin sans effacer
         f.write(ligne + "\n")
+
+# --- Notification Windows : prévient quand un fichier n'est pas rangé ---
+TOAST = (
+    "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null;"
+    "$x = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02);"
+    "$t = $x.GetElementsByTagName('text');"
+    "$t.Item(0).AppendChild($x.CreateTextNode($env:TOAST_TITRE)) | Out-Null;"
+    "$t.Item(1).AppendChild($x.CreateTextNode($env:TOAST_TEXTE)) | Out-Null;"
+    "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("
+    "'{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe')"
+    ".Show([Windows.UI.Notifications.ToastNotification]::new($x))")
+
+def notifier(titre, texte):
+    try:                                                                # textes passés par variables : pas d'injection via un nom de fichier
+        subprocess.Popen(["powershell.exe", "-NoProfile", "-Command", TOAST],
+                         env={**os.environ, "TOAST_TITRE": titre, "TOAST_TEXTE": texte},
+                         creationflags=subprocess.CREATE_NO_WINDOW)     # sans fenêtre, sans attendre
+    except Exception as e:
+        journal(f"  notification impossible : {e}")
 
 # --- Sécurité : l'IA ne peut toucher qu'aux fichiers posés directement dans Téléchargements ---
 def dans_telechargements(nom):
@@ -41,16 +61,36 @@ def lister_dossiers() -> str:
     """Liste les dossiers et sous-dossiers existants où un fichier peut être rangé."""
     dossiers = []
     for racine in RACINES:
-        dossiers.append(racine.name)                                    # ex : Documents
-        for d in racine.glob("*/"):                                     # 1er niveau : Documents/Travail
-            if not d.name.startswith("."):
-                dossiers.append(f"{racine.name}/{d.name}")
-                for s in d.glob("*/"):                                  # 2e niveau : Documents/Travail/Client
-                    if not s.name.startswith("."):
-                        dossiers.append(f"{racine.name}/{d.name}/{s.name}")
-    return "\n".join(dossiers[:300])                                    # limite pour rester rapide
+        for chemin, sous, _ in os.walk(racine):
+            sous[:] = sorted(s for s in sous if not s.startswith("."))  # ignore les dossiers cachés
+            if len(Path(chemin).relative_to(racine).parts) >= PROFONDEUR:
+                sous.clear()                                            # ne descend pas plus bas
+            dossiers.append(Path(chemin).relative_to(HOME).as_posix())  # ex : Documents/Travail/Client
+    return "\n".join(dossiers[:500])                                    # limite pour rester rapide
 
-# --- Outil 2 : lire le début d'un fichier ---
+# --- Outil 2 : retrouver les fichiers proches déjà rangés ---
+@beta_tool
+def chercher_similaires(nom: str) -> str:
+    """Cherche dans les dossiers rangés des fichiers dont le nom ressemble à celui-ci (même sujet, autre version, même série).
+    Un fichier proche déjà rangé indique souvent le bon dossier."""
+    mots = {m for m in re.split(r"[\W_]+", Path(nom).stem.lower())     # mots du nom, accents compris
+            if len(m) >= 4 and not m.isdigit()}                         # ignore "ia", "(1)", "2026"…
+    if not mots:
+        return "Nom trop court pour chercher des fichiers proches"
+    trouves = []
+    for racine in RACINES:
+        for chemin, sous, fichiers in os.walk(racine):
+            sous[:] = [s for s in sous if not s.startswith(".")]
+            for f in fichiers:
+                communs = mots & set(re.split(r"[\W_]+", Path(f).stem.lower()))
+                if len(communs) >= min(2, len(mots)):                   # au moins 2 mots en commun
+                    trouves.append((len(communs), (Path(chemin) / f).relative_to(HOME).as_posix()))
+    if not trouves:
+        return "Aucun fichier proche déjà rangé"
+    trouves.sort(reverse=True)                                          # les plus ressemblants d'abord
+    return "\n".join(f"{chemin} ({n} mots communs)" for n, chemin in trouves[:10])
+
+# --- Outil 3 : lire le début d'un fichier ---
 @beta_tool
 def lire_debut(nom: str) -> str:
     """Lit le début du contenu d'un fichier PDF, Word, Excel, PowerPoint ou texte du dossier Téléchargements."""
@@ -83,7 +123,7 @@ def lire_debut(nom: str) -> str:
     except Exception as e:
         return f"Illisible : {e}"
 
-# --- Outil 3 : déplacer un fichier ---
+# --- Outil 4 : déplacer un fichier ---
 @beta_tool
 def deplacer(nom: str, destination: str, raison: str) -> str:
     """Déplace un fichier vers un dossier existant (chemin tel que donné par lister_dossiers) ou vers 'A_trier'.
@@ -110,6 +150,8 @@ def deplacer(nom: str, destination: str, raison: str) -> str:
         cible = dossier / f"{src.stem}_{datetime.now():%Y-%m-%d_%H%M%S}{src.suffix}"
     shutil.move(src, cible)                                             # déplacement réel
     journal(f"RANGÉ   | {nom} -> {cible} | raison : {raison}")
+    if dossier == A_TRIER:
+        notifier(f"À trier : {nom}", raison)                            # Phil doit décider lui-même
     return "déplacé"
 
 # --- L'agent : l'IA décide (prompt structuré ROCIF) ---
@@ -117,17 +159,18 @@ def ranger(nom):
     journal(f"NOUVEAU | {nom}")
     fin = anthropic.Anthropic(api_key=os.environ["DOC_SORTER_API_KEY"]).beta.messages.tool_runner(  # clé propre à cet agent
         model="claude-haiku-5-5", max_tokens=2000,                      # modèle rapide et peu cher
-        tools=[lister_dossiers, lire_debut, deplacer],                  # ses 3 outils
+        tools=[lister_dossiers, chercher_similaires, lire_debut, deplacer],  # ses 4 outils
         messages=[{"role": "user", "content":
             "RÔLE : Tu es l'assistant de rangement de fichiers de Phil.\n"
             f"OBJECTIF : Ranger le fichier téléchargé « {nom} » au bon endroit.\n"
             "CONTEXTE : Phil classe ses fichiers par organisme ou projet (ex : Documents/Travail) "
             "avant de les classer par type. Les sous-dossiers précis sont toujours préférés aux dossiers génériques.\n"
             "INSTRUCTIONS :\n"
-            "1. Liste les dossiers existants.\n"
-            "2. Si le nom ne suffit pas, lis le début du fichier.\n"
-            "3. Range-le dans le dossier existant le plus précis.\n"
-            "4. S'il n'existe pas de dossier pour l'organisme ou le projet, utilise un dossier par type de document "
+            "1. Liste les dossiers existants et cherche les fichiers au nom proche déjà rangés.\n"
+            "2. Si un fichier proche traite du même sujet (autre version, même série), range-le dans le même dossier.\n"
+            "3. Sinon, si le nom ne suffit pas, lis le début du fichier.\n"
+            "4. Range-le dans le dossier existant le plus précis.\n"
+            "5. S'il n'existe pas de dossier pour l'organisme ou le projet, utilise un dossier par type de document "
             "s'il y en a un (ex : Documents/Factures pour une facture). Mets-le dans A_trier seulement si aucun "
             "dossier ne convient, même par type. Ne devine jamais.\n"
             "FORMAT : Une seule action de déplacement, avec une raison d'une phrase."}]
@@ -151,6 +194,7 @@ def attendre_fin(p, max_secondes=600):
             return True                                                 # 2 mesures identiques : téléchargement fini
         taille = nouvelle
     journal(f"ERREUR  | {p.name} | taille encore instable après {max_secondes} s")
+    notifier(f"Erreur : {p.name}", "Téléchargement jamais terminé, fichier non rangé")
     return False
 
 # --- Le déclencheur ---
@@ -165,6 +209,7 @@ class Handler(FileSystemEventHandler):
                     ranger(p.name)                                      # lance l'agent
         except Exception as e:
             journal(f"ERREUR  | {p.name} | {e}")                        # erreurs aussi dans le journal
+            notifier(f"Erreur : {p.name}", str(e)[:200])                # ex : clé API expirée
 
 # --- Démarrage ---
 obs = Observer(); obs.schedule(Handler(), str(DL)); obs.start()         # surveille Downloads
