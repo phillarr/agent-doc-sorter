@@ -1,1 +1,15 @@
+# Runs the automated tests on GitHub at each push
+name: tests
 
+on: [push, pull_request]
+
+jobs:
+  tests:
+    runs-on: windows-latest                 # the agent is Windows only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest -v
