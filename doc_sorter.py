@@ -39,14 +39,17 @@ TOAST = (
     "$t = $x.GetElementsByTagName('text');"
     "$t.Item(0).AppendChild($x.CreateTextNode($env:TOAST_TITLE)) | Out-Null;"
     "$t.Item(1).AppendChild($x.CreateTextNode($env:TOAST_TEXT)) | Out-Null;"
+    "if ($env:TOAST_LINK) { $x.DocumentElement.SetAttribute('activationType', 'protocol');"  # click = opens the link
+    " $x.DocumentElement.SetAttribute('launch', $env:TOAST_LINK) };"
     "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("
     "'{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe')"
     ".Show([Windows.UI.Notifications.ToastNotification]::new($x))")
 
-def notify(title, text):
+def notify(title, text, link=None):                                     # link: folder or file opened by a click
     try:                                                                # texts passed as variables: no injection through a file name
         subprocess.Popen(["powershell.exe", "-NoProfile", "-Command", TOAST],
-                         env={**os.environ, "TOAST_TITLE": title, "TOAST_TEXT": text},
+                         env={**os.environ, "TOAST_TITLE": title, "TOAST_TEXT": text,
+                              "TOAST_LINK": link.as_uri() if link else ""},
                          creationflags=subprocess.CREATE_NO_WINDOW)     # no window, no waiting
     except Exception as e:
         log(f"  notification failed: {e}")
@@ -166,16 +169,16 @@ def move_file(name: str, destination: str, reason: str) -> str:
     if target.is_file() and filecmp.cmp(src, target, shallow=False):    # same name AND same content, byte by byte
         src.unlink()                                                    # useless copy: the original is already sorted
         log(f"DUPLICATE | {name} already in {folder} (identical) -> downloaded copy deleted")
-        notify(f"Duplicate deleted: {name}", f"Already in {folder.relative_to(HOME).as_posix()}")
+        notify(f"Duplicate deleted: {name}", f"Already in {folder.relative_to(HOME).as_posix()}", folder)
         return "already there, identical: copy deleted"
     if target.exists():                                                 # same name, different content: avoid overwriting
         target = folder / f"{src.stem}_{datetime.now():%Y-%m-%d_%H%M%S}{src.suffix}"
     shutil.move(src, target)                                            # actual move
     log(f"SORTED | {name} -> {target} | reason: {reason}")
     if folder == TO_SORT:
-        notify(f"To sort: {name}", reason)                              # the user has to decide
+        notify(f"To sort: {name}", reason, folder)                      # the user has to decide
     else:
-        notify(f"Sorted: {target.name}", folder.relative_to(HOME).as_posix())  # the move is too fast to see: shows where it went
+        notify(f"Sorted: {target.name}", folder.relative_to(HOME).as_posix(), folder)  # the move is too fast to see: shows where it went
     return "moved"
 
 # --- The agent: the AI decides (ROCIF structured prompt) ---
@@ -218,7 +221,7 @@ def wait_until_written(p, max_seconds=600):
             return True                                                 # 2 identical readings: download finished
         size = new_size
     log(f"ERROR | {p.name} | size still changing after {max_seconds} s")
-    notify(f"Error: {p.name}", "Download never finished, file not sorted")
+    notify(f"Error: {p.name}", "Download never finished, file not sorted", LOG)
     return False
 
 # --- The trigger ---
@@ -233,10 +236,28 @@ class Handler(FileSystemEventHandler):
                     sort_file(p.name)                                   # runs the agent
         except Exception as e:
             log(f"ERROR | {p.name} | {e}")                              # errors go to the log too
-            notify(f"Error: {p.name}", str(e)[:200])                    # e.g. expired API key
+            notify(f"Error: {p.name}", str(e)[:200], LOG)               # e.g. expired API key
+
+# --- Single instance: two agents would process every file twice ---
+def other_agent():
+    try:
+        pid = int(PID.read_text())
+    except (OSError, ValueError):
+        return None                                                     # no PID file or damaged: nothing to check
+    if pid == os.getpid():
+        return None
+    cmd = subprocess.run(["powershell.exe", "-NoProfile", "-Command",
+                          f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"],
+                         capture_output=True, text=True, errors="ignore",
+                         creationflags=subprocess.CREATE_NO_WINDOW).stdout
+    return pid if "doc_sorter.py" in cmd else None                      # checks the command line: the number may have been reused
+
+if other := other_agent():
+    log(f"ALREADY RUNNING | another agent is running (PID {other}), this one stops")
+    raise SystemExit
 
 # --- Startup ---
-obs = Observer(); obs.schedule(Handler(), str(DL)); obs.start()         # watches Downloads
+obs =Observer(); obs.schedule(Handler(), str(DL)); obs.start()         # watches Downloads
 PID.write_text(str(os.getpid()))                                        # allows a targeted stop
 log(f"STARTUP | watching {DL} | PID {os.getpid()}")
 
