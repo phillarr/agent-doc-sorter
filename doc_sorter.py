@@ -1,9 +1,10 @@
 # --- Bibliothèques ---
-import os, re, time, shutil, filecmp, subprocess, anthropic  # processus, mots, temps, fichiers, notifications, API Claude
+import os, re, io, time, base64, shutil, filecmp, subprocess, anthropic  # processus, mots, mémoire, temps, encodage, fichiers, notifications, API Claude
 from datetime import datetime                       # date et heure pour le journal
 from pathlib import Path                            # manipulation des chemins
 from anthropic import beta_tool                     # transforme une fonction Python en outil pour l'IA
-from pypdf import PdfReader                         # lecture des PDF
+from pypdf import PdfReader, PdfWriter              # lecture des PDF, extraction d'une page
+from PIL import Image                               # réduction des images avant envoi
 from docx import Document                           # lecture des Word
 from openpyxl import load_workbook                  # lecture des Excel
 from pptx import Presentation                       # lecture des PowerPoint
@@ -20,6 +21,7 @@ JOURNAL = Path(__file__).parent / "journal.log"     # fichier de log, à côté 
 RATTRAPAGE_JOURS = 7                                # au démarrage, range les fichiers de moins de 7 jours
 PID = Path(__file__).parent / "agent.pid"           # numéro du processus, pour n'arrêter que cet agent
 PROFONDEUR = 4                                      # niveaux de sous-dossiers montrés à l'IA (Documents/Travail/Client/Projet/2026)
+IMAGES = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff")  # montrées à l'IA, qui sait les lire
 
 # --- Journal : écrit à l'écran ET dans le fichier ---
 def journal(message):
@@ -92,15 +94,32 @@ def chercher_similaires(nom: str) -> str:
 
 # --- Outil 3 : lire le début d'un fichier ---
 @beta_tool
-def lire_debut(nom: str) -> str:
-    """Lit le début du contenu d'un fichier PDF, Word, Excel, PowerPoint ou texte du dossier Téléchargements."""
+def lire_debut(nom: str) -> str | list:
+    """Lit le début du contenu d'un fichier PDF, Word, Excel, PowerPoint, texte ou image du dossier Téléchargements.
+    Pour une image ou un PDF scanné, renvoie l'image de la 1re page."""
     f = dans_telechargements(nom)
     if not f:
         return "Fichier introuvable dans Téléchargements"
     ext = f.suffix.lower()
     try:
         if ext == ".pdf":
-            texte = PdfReader(f).pages[0].extract_text() or ""          # 1re page
+            pdf = PdfReader(f)
+            texte = pdf.pages[0].extract_text() or ""                   # 1re page
+            if len(texte.strip()) < 20:                                 # pas de texte : PDF scanné
+                page = PdfWriter(); page.add_page(pdf.pages[0])         # 1re page seule, pour limiter le coût
+                tampon = io.BytesIO(); page.write(tampon)
+                journal(f"  {nom} : PDF scanné, 1re page envoyée à l'IA")
+                return [{"type": "document", "source": {"type": "base64", "media_type": "application/pdf",
+                         "data": base64.standard_b64encode(tampon.getvalue()).decode()}},
+                        {"type": "text", "text": "PDF scanné : voici sa 1re page."}]
+        elif ext in IMAGES:
+            img = Image.open(f); img.seek(0)                            # 1re image si GIF animé ou TIFF multipage
+            img = img.convert("RGB"); img.thumbnail((1568, 1568))       # réduite : moins de jetons, toujours lisible
+            tampon = io.BytesIO(); img.save(tampon, "JPEG", quality=85)
+            journal(f"  {nom} : image envoyée à l'IA")
+            return [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                     "data": base64.standard_b64encode(tampon.getvalue()).decode()}},
+                    {"type": "text", "text": "Voici l'image."}]
         elif ext == ".docx":
             texte = "\n".join(p.text for p in Document(f).paragraphs)   # paragraphes
         elif ext in (".xlsx", ".xlsm"):
