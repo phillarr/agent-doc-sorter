@@ -236,9 +236,25 @@ PID.write_text(str(os.getpid()))                                        # permet
 journal(f"DÉMARRAGE | surveillance de {DL} | PID {os.getpid()}")
 
 # --- Rattrapage : fichiers arrivés pendant que l'agent était arrêté ---
+def deja_vus():
+    """Dernière date à laquelle l'agent a traité chaque nom de fichier, d'après le journal."""
+    vus = {}
+    if JOURNAL.exists():
+        for ligne in JOURNAL.read_text(encoding="utf-8", errors="ignore").splitlines():
+            date, _, reste = ligne.partition(" | ")
+            if reste.startswith("NOUVEAU | "):
+                try:
+                    vus[reste[10:]] = datetime.strptime(date, "%Y-%m-%d %H:%M:%S").timestamp()
+                except ValueError:
+                    pass                                                # ligne abîmée : ignorée
+    return vus
+
 limite = time.time() - RATTRAPAGE_JOURS * 86400
-en_attente = [p for p in sorted(DL.iterdir()) if p.is_file() and p.stat().st_mtime > limite]
-journal(f"RATTRAPAGE | {len(en_attente)} fichier(s) de moins de {RATTRAPAGE_JOURS} jours")
+vus = deja_vus()
+recents = [p for p in sorted(DL.iterdir()) if p.is_file() and p.stat().st_mtime > limite]
+en_attente = [p for p in recents if p.stat().st_mtime > vus.get(p.name, 0)]  # déjà traité et pas modifié depuis : laissé exprès
+journal(f"RATTRAPAGE | {len(en_attente)} fichier(s) de moins de {RATTRAPAGE_JOURS} jours"
+        f" ({len(recents) - len(en_attente)} déjà traité(s), laissé(s) en place)")
 for p in en_attente:
     Handler().check(p)                                                  # mêmes filtres qu'un nouveau téléchargement
 

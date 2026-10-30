@@ -10,6 +10,7 @@ Agent qui range automatiquement les fichiers téléchargés.
   - `lire_debut` : début du contenu (PDF, Word, Excel, PowerPoint, texte ; les autres fichiers binaires ne sont pas lus). Les images (réduites à 1568 px) et la 1re page des PDF scannés sont envoyées telles quelles à Claude, qui les lit ;
   - `deplacer` : déplace vers un dossier existant et autorisé, ou vers `Downloads/A_trier` en cas de doute.
 - Chaque action est écrite dans `journal.log` (à côté du script, ignoré par git).
+- Au démarrage, l'agent range les fichiers de moins de 7 jours arrivés pendant qu'il était arrêté. Un fichier déjà traité (son nom figure dans le journal) et non modifié depuis est considéré comme laissé exprès dans Téléchargements, et n'est pas déplacé.
 - Une notification Windows signale chaque fichier envoyé dans `A_trier` et chaque erreur.
 - Dépendances : `anthropic`, `watchdog`, `pypdf`, `python-docx`, `openpyxl`, `python-pptx`, `pillow`. La clé API est lue dans la variable d'environnement Utilisateur `DOC_SORTER_API_KEY` (clé « agent-doc-sorter » dans la console Anthropic, distincte de celle des autres agents).
 
