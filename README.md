@@ -1,5 +1,7 @@
 # agent-doc-sorter
 
+[![tests](https://github.com/phillarr/agent-doc-sorter/actions/workflows/tests.yml/badge.svg)](https://github.com/phillarr/agent-doc-sorter/actions/workflows/tests.yml)
+
 AI agent that automatically sorts downloaded files on Windows.
 
 When a file lands in Downloads, the agent looks at your existing folders, reads the beginning of the file if needed, then moves it to the right place in Documents, Pictures, Music or Videos. When in doubt, it puts it in `Downloads\To_sort` and shows a notification.
@@ -70,6 +72,15 @@ explorer.exe "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\agent-d
 The `pythonw` filter avoids stopping another program if the ID has been reused. Going through `explorer.exe` ensures the agent inherits the `DOC_SORTER_API_KEY` user variable.
 
 Then check in `journal.log` that a recent `STARTUP` line appears, and that a test file is `SORTED`. An authentication error only shows up on the first file.
+
+## Tests
+
+`test_doc_sorter.py` checks the safeguards (files outside Downloads, forbidden destinations), moves, duplicates, installers and the catch-up, in a temporary folder and without calling the API. GitHub runs them at each push; to run them yourself:
+
+```powershell
+pip install pytest
+python -m pytest
+```
 
 ## License
 

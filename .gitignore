@@ -1,3 +1,5 @@
 journal.log
 journal.old.log
 agent.pid
+__pycache__/
+.pytest_cache/
