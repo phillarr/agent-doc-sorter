@@ -21,11 +21,13 @@ L'agent tourne en arrière-plan via `pythonw` (sans fenêtre), lancé au démarr
 
 Le processus en cours garde l'ancienne version : il faut l'arrêter puis le relancer.
 
+Au démarrage, l'agent écrit son numéro de processus dans `agent.pid` (ignoré par git), ce qui permet de n'arrêter que lui :
+
 ```powershell
-taskkill /im pythonw.exe /f
-& "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\agent-doc-sorter.bat"
+Get-Process -Id (Get-Content C:\Users\<nom>\agent-doc-sorter\agent.pid) -ErrorAction SilentlyContinue | Where-Object Name -eq pythonw | Stop-Process -Force
+explorer.exe "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\agent-doc-sorter.bat"
 ```
 
-Attention : `taskkill /im pythonw.exe /f` arrête **tous** les processus `pythonw`, pas seulement cet agent.
+Le filtre `pythonw` évite d'arrêter un autre programme si le numéro a été réattribué. Passer par `explorer.exe` garantit que l'agent hérite de la variable utilisateur `ANTHROPIC_API_KEY`.
 
-Vérifier ensuite dans `journal.log` qu'une ligne `DÉMARRAGE` récente apparaît.
+Vérifier ensuite dans `journal.log` qu'une ligne `DÉMARRAGE` récente apparaît, puis qu'un fichier test est bien `RANGÉ` (une erreur d'authentification n'apparaît qu'au premier fichier).

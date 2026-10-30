@@ -1,5 +1,5 @@
 # --- Bibliothèques ---
-import time, shutil, anthropic                      # temps, déplacement de fichiers, API Claude
+import os, time, shutil, anthropic                  # processus, temps, déplacement de fichiers, API Claude
 from datetime import datetime                       # date et heure pour le journal
 from pathlib import Path                            # manipulation des chemins
 from anthropic import beta_tool                     # transforme une fonction Python en outil pour l'IA
@@ -17,6 +17,7 @@ RACINES = [HOME / "Documents", HOME / "Pictures",   # seuls endroits autorisés 
            HOME / "Music", HOME / "Videos"]
 JOURNAL = Path(__file__).parent / "journal.log"     # fichier de log, à côté du script
 RATTRAPAGE_JOURS = 7                                # au démarrage, range les fichiers de moins de 7 jours
+PID = Path(__file__).parent / "agent.pid"           # numéro du processus, pour n'arrêter que cet agent
 
 # --- Journal : écrit à l'écran ET dans le fichier ---
 def journal(message):
@@ -122,6 +123,22 @@ def ranger(nom):
         journal(f"NON RANGÉ | {nom} | arrêt : {fin.stop_reason} | réponse : {texte[:300]}")
         deplacer(nom, "A_trier", "l'IA n'a pas choisi de dossier")      # filet de sécurité
 
+# --- Attend que le fichier ait fini de s'écrire (taille stable) ---
+def attendre_fin(p, max_secondes=600):
+    taille = -1
+    for _ in range(max_secondes):
+        time.sleep(1)
+        if not p.is_file():
+            return False                                                # disparu entre-temps
+        if (DL / (p.name + ".part")).exists():                          # Firefox : fichier vide + .part en cours
+            return False                                                # on sera rappelé au renommage du .part
+        nouvelle = p.stat().st_size
+        if nouvelle == taille:
+            return True                                                 # 2 mesures identiques : téléchargement fini
+        taille = nouvelle
+    journal(f"ERREUR  | {p.name} | taille encore instable après {max_secondes} s")
+    return False
+
 # --- Le déclencheur ---
 class Handler(FileSystemEventHandler):
     def on_created(self, e): self.check(e.src_path)                     # nouveau fichier
@@ -130,15 +147,15 @@ class Handler(FileSystemEventHandler):
         p = Path(p)
         try:
             if p.parent == DL and p.suffix.lower() not in (".crdownload", ".tmp", ".part"):  # ignore les téléchargements en cours
-                time.sleep(2)                                           # laisse le fichier finir de s'écrire
-                if p.is_file():
+                if attendre_fin(p):
                     ranger(p.name)                                      # lance l'agent
         except Exception as e:
             journal(f"ERREUR  | {p.name} | {e}")                        # erreurs aussi dans le journal
 
 # --- Démarrage ---
 obs = Observer(); obs.schedule(Handler(), str(DL)); obs.start()         # surveille Downloads
-journal(f"DÉMARRAGE | surveillance de {DL}")
+PID.write_text(str(os.getpid()))                                        # permet l'arrêt ciblé
+journal(f"DÉMARRAGE | surveillance de {DL} | PID {os.getpid()}")
 
 # --- Rattrapage : fichiers arrivés pendant que l'agent était arrêté ---
 limite = time.time() - RATTRAPAGE_JOURS * 86400
