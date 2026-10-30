@@ -4,7 +4,7 @@ AI agent that automatically sorts downloaded files on Windows.
 
 When a file lands in Downloads, the agent looks at your existing folders, reads the beginning of the file if needed, then moves it to the right place in Documents, Pictures, Music or Videos. When in doubt, it puts it in `Downloads\A_trier` ("to sort") and shows a notification.
 
-The prompt, the log and the notifications are in French.
+The code comments and the log labels are in French. The prompt is in English; the reasons Claude gives (shown in the log and notifications) are written in the language set by `LANGUE`.
 
 ## How it works
 
@@ -38,7 +38,7 @@ Requirements: Windows 10/11, Python 3.10 or newer, an account on [console.anthro
    [Environment]::SetEnvironmentVariable("DOC_SORTER_API_KEY", "your-key", "User")
    ```
 
-3. Set `UTILISATEUR` (your first name) at the top of `doc_sorter.py`.
+3. Set `UTILISATEUR` (your first name) and `LANGUE` (language of the reasons, e.g. `"English"`) at the top of `doc_sorter.py`.
 
 4. Test it in the foreground (Ctrl + C to stop), in a new PowerShell window so the variable is picked up:
 

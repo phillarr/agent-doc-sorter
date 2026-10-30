@@ -13,6 +13,7 @@ from watchdog.events import FileSystemEventHandler  # réagit aux nouveaux fichi
 
 # --- Configuration ---
 UTILISATEUR = "Phil"                                # prénom utilisé dans le prompt : à adapter
+LANGUE = "French"                                   # langue des raisons (journal, notifications) : à adapter
 HOME = Path.home()                                  # ex : C:\Users\<nom>
 DL = HOME / "Downloads"                             # dossier surveillé
 A_TRIER = DL / "A_trier"                            # destination en cas de doute
@@ -181,19 +182,19 @@ def ranger(nom):
         model="claude-haiku-5-5", max_tokens=2000,                      # modèle rapide et peu cher
         tools=[lister_dossiers, chercher_similaires, lire_debut, deplacer],  # ses 4 outils
         messages=[{"role": "user", "content":
-            f"RÔLE : Tu es l'assistant de rangement de fichiers de {UTILISATEUR}.\n"
-            f"OBJECTIF : Ranger le fichier téléchargé « {nom} » au bon endroit.\n"
-            f"CONTEXTE : {UTILISATEUR} classe ses fichiers par organisme ou projet (ex : Documents/Banque) "
-            "avant de les classer par type. Les sous-dossiers précis sont toujours préférés aux dossiers génériques.\n"
-            "INSTRUCTIONS :\n"
-            "1. Liste les dossiers existants et cherche les fichiers au nom proche déjà rangés.\n"
-            "2. Si un fichier proche traite du même sujet (autre version, même série), range-le dans le même dossier.\n"
-            "3. Sinon, si le nom ne suffit pas, lis le début du fichier.\n"
-            "4. Range-le dans le dossier existant le plus précis.\n"
-            "5. S'il n'existe pas de dossier pour l'organisme ou le projet, utilise un dossier par type de document "
-            "s'il y en a un (ex : Documents/Factures pour une facture). Mets-le dans A_trier seulement si aucun "
-            "dossier ne convient, même par type. Ne devine jamais.\n"
-            "FORMAT : Une seule action de déplacement, avec une raison d'une phrase."}]
+            f"ROLE: You are {UTILISATEUR}'s file sorting assistant.\n"
+            f"OBJECTIVE: Move the downloaded file \"{nom}\" to the right place.\n"
+            f"CONTEXT: {UTILISATEUR} organizes files by organization or project (e.g. Documents/Bank) "
+            "before organizing them by type. Specific subfolders are always preferred over generic folders.\n"
+            "INSTRUCTIONS:\n"
+            "1. List the existing folders and search for already sorted files with a similar name.\n"
+            "2. If a similar file covers the same subject (another version, same series), put it in the same folder.\n"
+            "3. Otherwise, if the name is not enough, read the beginning of the file.\n"
+            "4. Put it in the most specific existing folder.\n"
+            "5. If there is no folder for the organization or project, use a folder by document type "
+            "if one exists (e.g. Documents/Invoices for an invoice). Put it in A_trier only if no "
+            "folder fits, not even by type. Never guess.\n"
+            f"FORMAT: A single move action, with a one-sentence reason written in {LANGUE}."}]
     ).until_done()                                                      # tourne jusqu'à la fin
     if (DL / nom).exists():                                             # l'IA s'est arrêtée sans déplacer le fichier
         texte = " ".join(b.text for b in fin.content if b.type == "text").replace("\n", " ")
