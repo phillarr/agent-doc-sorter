@@ -88,7 +88,7 @@ def deplacer(nom: str, destination: str, raison: str) -> str:
 # --- L'agent : l'IA décide (prompt structuré ROCIF) ---
 def ranger(nom):
     journal(f"NOUVEAU | {nom}")
-    anthropic.Anthropic().beta.messages.tool_runner(
+    fin = anthropic.Anthropic().beta.messages.tool_runner(
         model="claude-haiku-5-5", max_tokens=800,                       # modèle rapide et peu cher
         tools=[lister_dossiers, lire_debut, deplacer],                  # ses 3 outils
         messages=[{"role": "user", "content":
@@ -103,6 +103,10 @@ def ranger(nom):
             "4. Si aucun ne convient clairement, mets-le dans A_trier. Ne devine jamais.\n"
             "FORMAT : Une seule action de déplacement, avec une raison d'une phrase."}]
     ).until_done()                                                      # tourne jusqu'à la fin
+    if (DL / nom).exists():                                             # l'IA s'est arrêtée sans déplacer le fichier
+        texte = " ".join(b.text for b in fin.content if b.type == "text").replace("\n", " ")
+        journal(f"NON RANGÉ | {nom} | arrêt : {fin.stop_reason} | réponse : {texte[:300]}")
+        deplacer(nom, "A_trier", "l'IA n'a pas choisi de dossier")      # filet de sécurité
 
 # --- Le déclencheur ---
 class Handler(FileSystemEventHandler):
