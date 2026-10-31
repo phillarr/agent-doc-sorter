@@ -10,7 +10,7 @@ from watchdog.events import FileSystemEventHandler  # reacts to new files
 from watchdog.observers import Observer             # watches a folder
 
 from config import CATCHUP_DAYS, DL, INSTALLERS, LANGUAGE, LOG, LOG_MAX, LOG_OLD, PID, USER_NAME
-from tools import find_similar, list_folders, log, move_file, notify, read_start
+from tools import find_similar, list_folders, log, move_file, notify, read_start, register_app
 
 
 # --- The agent: the AI decides (ROCIF structured prompt) ---
@@ -136,6 +136,7 @@ def main():
     if LOG.exists() and LOG.stat().st_size > LOG_MAX:                   # log rotation: keeps the log from growing forever
         LOG.replace(LOG_OLD)                                            # the previous archive is overwritten
         log(f"LOG ROTATED | previous log moved to {LOG_OLD.name}")
+    register_app()                                                      # notifications show "agent-doc-sorter" and its icon
     observer = Observer()
     observer.schedule(Handler(), str(DL))                               # watches Downloads
     observer.start()

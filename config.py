@@ -15,6 +15,8 @@ LOG = HERE / "journal.log"                          # log file, next to the scri
 LOG_OLD = HERE / "journal.old.log"                  # previous log, kept after rotation
 LOG_MAX = 1_000_000                                 # on startup, the log is rotated above 1 MB (about a year)
 PID = HERE / "agent.pid"                            # process ID, to stop only this agent
+ICON = HERE / "icon.png"                            # icon shown on notifications
+APP_ID = "agent-doc-sorter"                         # name shown on notifications
 
 CATCHUP_DAYS = 7                                    # on startup, sorts files less than 7 days old
 DEPTH = 4                                           # subfolder levels shown to the AI (Documents/Work/Client/Project/2026)

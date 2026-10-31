@@ -19,7 +19,7 @@ The reasons Claude gives (shown in the log and notifications) are written in the
 - Installers (`.exe`, `.msi`) are left in Downloads, without calling the AI: they are usually run right away.
 - Every action is written to `journal.log` (next to the script, ignored by git). On startup, a log larger than 1 MB is renamed `journal.old.log` (replacing the previous one) and a new log is started.
 - On startup, the agent sorts files less than 7 days old that arrived while it was stopped. A file already processed (its name appears in the log) and not modified since is assumed to have been left in Downloads on purpose, and is not moved.
-- A Windows notification shows where each file went (or that it was a duplicate), each file sent to `To_sort` and each error. Clicking it opens the folder (or the log, for an error).
+- A Windows notification shows where each file went (or that it was a duplicate), each file sent to `To_sort` and each error. Clicking it opens the folder (or the log, for an error). Notifications show the agent's name and icon (`icon.png`), registered for the current user on startup.
 - Only one agent runs at a time: if another one is already running, a new instance writes `ALREADY RUNNING` to the log and stops.
 
 **Privacy**: your folder names, the names of some already sorted files and the beginning of downloaded files' content are sent to the Anthropic API to decide where files go.

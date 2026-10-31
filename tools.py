@@ -6,6 +6,7 @@ import os                                           # folders and environment va
 import re                                           # splits names into words
 import shutil                                       # moves files
 import subprocess                                   # runs PowerShell for notifications
+import winreg                                      # registers the notification name and icon
 from datetime import datetime                       # date and time for the log
 from pathlib import Path                            # path handling
 
@@ -16,7 +17,7 @@ from PIL import Image                               # shrinks images before send
 from pptx import Presentation                       # reads PowerPoint files
 from pypdf import PdfReader, PdfWriter              # reads PDFs, extracts a page
 
-from config import DEPTH, DL, HOME, IMAGES, LOG, ROOTS, TO_SORT
+from config import APP_ID, DEPTH, DL, HOME, ICON, IMAGES, LOG, ROOTS, TO_SORT
 
 
 # --- Log: written to the screen AND to the file ---
@@ -36,15 +37,24 @@ TOAST = (
     "$t.Item(1).AppendChild($x.CreateTextNode($env:TOAST_TEXT)) | Out-Null;"
     "if ($env:TOAST_LINK) { $x.DocumentElement.SetAttribute('activationType', 'protocol');"  # click = opens the link
     " $x.DocumentElement.SetAttribute('launch', $env:TOAST_LINK) };"
-    "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("
-    "'{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe')"
+    "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($env:TOAST_APP)"
     ".Show([Windows.UI.Notifications.ToastNotification]::new($x))")
+
+
+def register_app():
+    """Tells Windows the name and icon to show on notifications (current user only, no admin needed)."""
+    try:
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"Software\Classes\AppUserModelId\{APP_ID}") as key:
+            winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, APP_ID)
+            winreg.SetValueEx(key, "IconUri", 0, winreg.REG_SZ, str(ICON))
+    except OSError as e:
+        log(f"  notification name not registered: {e}")
 
 
 def notify(title, text, link=None):                                     # link: folder or file opened by a click
     try:                                                                # texts passed as variables: no injection through a file name
         subprocess.Popen(["powershell.exe", "-NoProfile", "-Command", TOAST],
-                         env={**os.environ, "TOAST_TITLE": title, "TOAST_TEXT": text,
+                         env={**os.environ, "TOAST_APP": APP_ID, "TOAST_TITLE": title, "TOAST_TEXT": text,
                               "TOAST_LINK": link.as_uri() if link else ""},
                          creationflags=subprocess.CREATE_NO_WINDOW)     # no window, no waiting
     except Exception as e:
