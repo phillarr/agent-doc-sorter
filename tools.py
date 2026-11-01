@@ -6,6 +6,7 @@ import os                                           # folders and environment va
 import re                                           # splits names into words
 import shutil                                       # moves files
 import subprocess                                   # runs PowerShell for notifications
+import time                                         # waits before retrying a locked file
 import winreg                                      # registers the notification name and icon
 from datetime import datetime                       # date and time for the log
 from pathlib import Path                            # path handling
@@ -193,7 +194,14 @@ def move_file(name: str, destination: str, reason: str) -> str:
         return "already there, identical: copy deleted"
     if target.exists():                                                 # same name, different content: avoid overwriting
         target = folder / f"{src.stem}_{datetime.now():%Y-%m-%d_%H%M%S}{src.suffix}"
-    shutil.move(src, target)                                            # actual move
+    for attempt in range(30):                                           # Office files are often locked a few seconds
+        try:                                                            # after download (antivirus scan, preview…)
+            shutil.move(src, target)                                    # actual move
+            break
+        except PermissionError:
+            if attempt == 29:
+                raise                                                   # still locked after 30 s: real problem
+            time.sleep(1)
     log(f"SORTED | {name} -> {target} | reason: {reason}")
     if folder == TO_SORT:
         notify(f"To sort: {name}", reason, folder)                      # the user has to decide
