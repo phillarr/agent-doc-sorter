@@ -150,3 +150,42 @@ def test_catch_up_leaves_processed_files_in_place(home, monkeypatch):
     (home / "journal.old.log").write_text(f"{time.strftime('%Y-%m-%d %H:%M:%S')} | NOUVEAU | kept.pdf\n")
     doc_sorter.catch_up()
     assert called == ["new.pdf"]
+
+
+def test_in_use(home):
+    f = home / "Downloads" / "report.docx"
+    f.write_text("x")
+    assert not tools.in_use(f)
+    with open(f):                                                       # Python, like Word, forbids moving an open file
+        assert tools.in_use(f)
+    assert not tools.in_use(f)
+    assert not tools.in_use(home / "Downloads" / "missing.docx")
+
+
+def test_open_file_waits_until_closed(home, monkeypatch):
+    called = []
+    monkeypatch.setattr(doc_sorter, "sort_file", called.append)
+    monkeypatch.setattr(doc_sorter.time, "sleep", lambda s: None)
+    monkeypatch.setattr(doc_sorter, "waiting", set())
+    f = home / "Downloads" / "report.docx"
+    f.write_text("x")
+    with open(f):                                                       # opened in Word before the agent sorts it
+        doc_sorter.Handler().check(f)
+        doc_sorter.Handler().check(f)                                   # Word saves: new event, same file
+        assert called == []                                             # no AI call while it is open
+        assert doc_sorter.closed_files() == []
+    log = (home / "journal.log").read_text()
+    assert log.count("WAITING | report.docx") == 1
+    for p in doc_sorter.closed_files():
+        doc_sorter.Handler().check(p)
+    assert called == ["report.docx"]                                    # closed: sorted
+    assert doc_sorter.waiting == set()
+
+
+def test_office_lock_files_are_ignored(home, monkeypatch):
+    called = []
+    monkeypatch.setattr(doc_sorter, "sort_file", called.append)
+    monkeypatch.setattr(doc_sorter.time, "sleep", lambda s: None)
+    (home / "Downloads" / "~$report.docx").write_text("x")
+    doc_sorter.Handler().check(home / "Downloads" / "~$report.docx")
+    assert called == []

@@ -1,5 +1,6 @@
 # --- Log, notifications and the 4 tools the AI can use ---
 import base64                                       # encodes images and PDFs for the API
+import ctypes                                       # asks Windows whether a file is open in another program
 import filecmp                                      # compares two files byte by byte
 import io                                           # files in memory
 import os                                           # folders and environment variables
@@ -69,6 +70,23 @@ def in_downloads(name):
         log(f"  refused: {name} (outside Downloads)")
         return None
     return f
+
+
+# --- Is the file open in another program (Word, Excel, a viewer…)? ---
+KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)
+KERNEL32.CreateFileW.restype = ctypes.c_void_p
+KERNEL32.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p,
+                                 ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
+KERNEL32.CloseHandle.argtypes = [ctypes.c_void_p]
+
+
+def in_use(p):
+    """True if another program holds the file and prevents moving it (the cause of WinError 32)."""
+    handle = KERNEL32.CreateFileW(str(p), 0x00010000, 7, None, 3, 0, None)  # asks for the right a move needs (DELETE), shares everything
+    if handle in (None, ctypes.c_void_p(-1).value):                     # refused
+        return ctypes.get_last_error() in (32, 33)                      # sharing or lock violation = open elsewhere
+    KERNEL32.CloseHandle(handle)                                        # only a check: nothing changed
+    return False
 
 
 def as_base64(data):

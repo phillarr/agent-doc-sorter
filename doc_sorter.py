@@ -1,6 +1,7 @@
 # --- agent-doc-sorter: watches Downloads and lets an AI agent sort each new file ---
 import os                                           # process ID and API key
 import subprocess                                   # checks whether another agent is running
+import threading                                    # one file at a time (watcher and main loop)
 import time                                         # waiting
 from datetime import datetime                       # reads the dates of the log
 from pathlib import Path                            # path handling
@@ -10,7 +11,10 @@ from watchdog.events import FileSystemEventHandler  # reacts to new files
 from watchdog.observers import Observer             # watches a folder
 
 from config import CATCHUP_DAYS, DL, INSTALLERS, LANGUAGE, LOG, LOG_MAX, LOG_OLD, PID, USER_NAME
-from tools import find_similar, list_folders, log, move_file, notify, read_start, register_app
+from tools import find_similar, in_use, list_folders, log, move_file, notify, read_start, register_app
+
+waiting = set()                                                         # files open in another program: sorted once closed
+busy = threading.Lock()                                                 # the watcher and the main loop never sort at the same time
 
 
 # --- The agent: the AI decides (ROCIF structured prompt) ---
@@ -39,7 +43,33 @@ def sort_file(name):
     if (DL / name).exists():                                            # the AI stopped without moving the file
         text = " ".join(b.text for b in result.content if b.type == "text").replace("\n", " ")
         log(f"NOT SORTED | {name} | stop: {result.stop_reason} | answer: {text[:300]}")
-        move_file(name, "To_sort", "the AI did not choose a folder")    # safety net
+        if in_use(DL / name):                                           # opened while the AI was working
+            wait_for_close(DL / name)
+        else:
+            move_file(name, "To_sort", "the AI did not choose a folder")  # safety net
+
+
+# --- A file open in Word, Excel… cannot be moved: it is sorted once closed, without calling the AI meanwhile ---
+def wait_for_close(p):
+    if p not in waiting:                                                # Word saves by renaming: many events, one line
+        waiting.add(p)
+        log(f"WAITING | {p.name} | open in another program, will be sorted once closed")
+
+
+def closed_files():
+    """Files of the waiting list that were closed (or removed) since the last call."""
+    done = [p for p in list(waiting) if not p.is_file() or not in_use(p)]
+    for p in done:
+        waiting.discard(p)
+    return [p for p in done if p.is_file()]                             # deleted or moved by the user: forgotten
+
+
+def free_soon(p, seconds=10):
+    for _ in range(seconds):                                            # antivirus scan, preview: a few seconds
+        if not in_use(p):
+            return True
+        time.sleep(1)
+    return False
 
 
 # --- Waits until the file is fully written (stable size) ---
@@ -71,11 +101,18 @@ class Handler(FileSystemEventHandler):
     def check(self, p):
         p = Path(p)
         try:
-            if p.parent == DL and p.suffix.lower() not in (".crdownload", ".tmp", ".part"):  # skips downloads in progress
+            if (p.parent == DL and p.suffix.lower() not in (".crdownload", ".tmp", ".part")  # skips downloads in progress
+                    and not p.name.startswith("~$")):                   # and Office lock files ("~$report.docx")
                 if p.suffix.lower() in INSTALLERS:
                     log(f"SKIPPED | {p.name} | installer, left in Downloads")  # no AI call: free
+                elif p in waiting:
+                    pass                                                # still open: the main loop will retry
                 elif wait_until_written(p):
-                    sort_file(p.name)                                   # runs the agent
+                    if not free_soon(p):
+                        wait_for_close(p)                               # no AI call while it is open
+                    else:
+                        with busy:
+                            sort_file(p.name)                           # runs the agent
         except Exception as e:
             log(f"ERROR | {p.name} | {e}")                              # errors go to the log too
             notify(f"Error: {p.name}", str(e)[:200], LOG)               # e.g. expired API key
@@ -144,7 +181,9 @@ def main():
     log(f"STARTUP | watching {DL} | PID {os.getpid()}")
     catch_up()
     while True:
-        time.sleep(1)                                                   # Ctrl + C to stop
+        time.sleep(5)                                                   # Ctrl + C to stop
+        for p in closed_files():
+            Handler().check(p)                                          # closed: sorted now
 
 
 if __name__ == "__main__":
