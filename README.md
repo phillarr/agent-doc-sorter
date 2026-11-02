@@ -22,6 +22,8 @@ The reasons Claude gives (shown in the log and notifications) are written in the
 - A Windows notification shows where each file went (or that it was a duplicate), each file sent to `To_sort` and each error. Clicking it opens the folder (or the log, for an error). Notifications show the agent's name and icon (`icon.png`), registered for the current user on startup.
 - Only one agent runs at a time: if another one is already running, a new instance writes `ALREADY RUNNING` to the log and stops.
 
+**Warning**: the AI can make mistakes and put a file in the wrong folder. The safeguards above limit the damage (no file is overwritten, and only an identical copy is ever deleted), but check from time to time where your files went: `journal.log` and the notifications show the destination of each file. Use at your own risk.
+
 **Privacy**: your folder names, the names of some already sorted files and the beginning of downloaded files' content are sent to the Anthropic API to decide where files go.
 
 ## Installation
