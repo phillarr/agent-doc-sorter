@@ -10,19 +10,48 @@ import anthropic                                    # Claude API
 from watchdog.events import FileSystemEventHandler  # reacts to new files
 from watchdog.observers import Observer             # watches a folder
 
-from config import CATCHUP_DAYS, DL, INSTALLERS, LANGUAGE, LOG, LOG_MAX, LOG_OLD, PID, USER_NAME
+from config import (CATCHUP_DAYS, DL, INSTALLERS, LANGUAGE, LOG, LOG_MAX, LOG_OLD, MAX_MONTHLY_COST, MODEL, PID,
+                    PRICE_PER_MTOK, USER_NAME)
 from tools import find_similar, in_use, list_folders, log, move_file, notify, read_start, register_app
 
 waiting = set()                                                         # files open in another program: sorted once closed
 busy = threading.Lock()                                                 # the watcher and the main loop never sort at the same time
 
 
+# --- Monthly budget: each sort writes its cost to the log ("TOKENS" line) ---
+def cost_of(model, input_tokens, output_tokens):
+    price = PRICE_PER_MTOK.get(model)
+    return (input_tokens * price[0] + output_tokens * price[1]) / 1e6 if price else 0  # unknown price: counts as zero
+
+
+def month_cost(now=None):
+    """$ spent this calendar month (local time), summed from the TOKENS lines of the log."""
+    month = (now or datetime.now()).strftime("%Y-%m")
+    total = 0.0
+    for f in (LOG_OLD, LOG):                                            # the log may have been rotated during the month
+        if not f.exists():
+            continue
+        for line in f.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if line.startswith(month) and " | TOKENS | " in line:
+                try:
+                    total += float(line.rpartition("$")[2])             # "... | $0.0012"
+                except ValueError:
+                    pass                                                # damaged line: skipped
+    return total
+
+
 # --- The agent: the AI decides (ROCIF structured prompt) ---
 def sort_file(name):
+    spent = month_cost()
+    if spent >= MAX_MONTHLY_COST:                                       # checked before each call to the API
+        log(f"BUDGET REACHED | {name} | ${spent:.4f} spent this month (limit ${MAX_MONTHLY_COST:.2f}): "
+            "left in Downloads, no sorting until next month")
+        notify(f"Not sorted: {name}", f"Monthly budget reached (${MAX_MONTHLY_COST:.2f}): no sorting until next month", LOG)
+        return
     log(f"NEW | {name}")
     client = anthropic.Anthropic(api_key=os.environ["DOC_SORTER_API_KEY"])  # key dedicated to this agent
-    result = client.beta.messages.tool_runner(
-        model="claude-haiku-5-5",                                       # fast, cheap model
+    runner = client.beta.messages.tool_runner(
+        model=MODEL,
         max_tokens=2000,
         tools=[list_folders, find_similar, read_start, move_file],      # its 4 tools
         messages=[{"role": "user", "content":
@@ -39,7 +68,19 @@ def sort_file(name):
             "if one exists (e.g. Documents/Invoices for an invoice). Put it in To_sort only if no "
             "folder fits, not even by type. Never guess.\n"
             f"FORMAT: A single move action, with a one-sentence reason written in {LANGUAGE}."}],
-    ).until_done()                                                      # runs until the end
+    )
+    requests = tokens_in = tokens_out = 0
+    try:
+        for result in runner:                                           # one answer per request, until the end
+            u = result.usage
+            requests += 1
+            tokens_in += sum(getattr(u, f, 0) or 0 for f in
+                             ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+            tokens_out += u.output_tokens or 0
+    finally:                                                            # also after an API error: what was spent counts
+        if requests:
+            log(f"TOKENS | {name} | {requests} requests | {tokens_in} in / {tokens_out} out"
+                f" | ${cost_of(MODEL, tokens_in, tokens_out):.4f}")
     if (DL / name).exists():                                            # the AI stopped without moving the file
         text = " ".join(b.text for b in result.content if b.type == "text").replace("\n", " ")
         log(f"NOT SORTED | {name} | stop: {result.stop_reason} | answer: {text[:300]}")
