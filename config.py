@@ -18,6 +18,10 @@ PID = HERE / "agent.pid"                            # process ID, to stop only t
 ICON = HERE / "icon.png"                            # icon shown on notifications
 APP_ID = "agent-doc-sorter"                         # name shown on notifications
 
+MODEL = "claude-haiku-5-5"                          # fast, cheap model
+PRICE_PER_MTOK = {"claude-haiku-5-5": (0.10, 0.50)}  # (input, output) in $ per million tokens: cost in the log
+MAX_MONTHLY_COST = 1.00                             # $ per calendar month, summed from the log; also set it in the Console
+
 CATCHUP_DAYS = 7                                    # on startup, sorts files less than 7 days old
 DEPTH = 4                                           # subfolder levels shown to the AI (Documents/Work/Client/Project/2026)
 INSTALLERS = (".exe", ".msi")                       # left in Downloads: they are usually run right away

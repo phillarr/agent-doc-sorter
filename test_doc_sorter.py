@@ -189,3 +189,52 @@ def test_office_lock_files_are_ignored(home, monkeypatch):
     (home / "Downloads" / "~$report.docx").write_text("x")
     doc_sorter.Handler().check(home / "Downloads" / "~$report.docx")
     assert called == []
+
+
+# --- Monthly budget ---
+class FakeAnthropic:
+    """Instead of the API: 2 requests, the second one moves the file."""
+    def __init__(self, api_key):
+        self.beta = self
+        self.messages = self
+
+    def tool_runner(self, **kwargs):
+        usage = type("U", (), {"input_tokens": 1000, "cache_creation_input_tokens": None,
+                               "cache_read_input_tokens": 0, "output_tokens": 200})()
+        def answers():
+            yield type("M", (), {"usage": usage})()
+            move("invoice.pdf", "Documents")
+            yield type("M", (), {"usage": usage})()
+        return answers()
+
+
+def test_month_cost_sums_this_month_only(home):
+    (home / "journal.old.log").write_text(
+        "2026-11-01 08:00:00 | TOKENS | a.pdf | 2 requests | 10 in / 5 out | $0.0100\n"
+        "2026-10-31 23:59:59 | TOKENS | b.pdf | 2 requests | 10 in / 5 out | $5.0000\n")
+    (home / "journal.log").write_text(
+        "2026-11-05 10:00:00 | TOKENS | c$.pdf | 3 requests | 10 in / 5 out | $0.0250\n"
+        "2026-11-05 10:00:01 | SORTED | d.pdf -> Documents | reason: cost $9\n")
+    now = doc_sorter.datetime(2026, 11, 20)
+    assert doc_sorter.month_cost(now) == pytest.approx(0.035)
+
+
+def test_sort_logs_its_cost(home, monkeypatch):
+    monkeypatch.setattr(doc_sorter.anthropic, "Anthropic", FakeAnthropic)
+    monkeypatch.setenv("DOC_SORTER_API_KEY", "test")
+    (home / "Downloads" / "invoice.pdf").write_text("x")
+    doc_sorter.sort_file("invoice.pdf")
+    assert (home / "Documents" / "invoice.pdf").exists()
+    assert "TOKENS | invoice.pdf | 2 requests | 2000 in / 400 out | $0.0004" in (home / "journal.log").read_text()
+
+
+def test_budget_reached_leaves_file_without_calling_the_api(home, monkeypatch, notes):
+    monkeypatch.setattr(doc_sorter, "month_cost", lambda: 1.0123)
+    monkeypatch.setattr(doc_sorter.anthropic, "Anthropic", None)        # would crash if called
+    (home / "Downloads" / "invoice.pdf").write_text("x")
+    doc_sorter.sort_file("invoice.pdf")
+    assert (home / "Downloads" / "invoice.pdf").exists()
+    log = (home / "journal.log").read_text()
+    assert "BUDGET REACHED | invoice.pdf | $1.0123 spent this month (limit $1.00)" in log
+    assert "NEW | invoice.pdf" not in log                               # not marked as processed: sorted by a later catch-up
+    assert len(notes) == 1

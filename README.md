@@ -20,6 +20,7 @@ The reasons Claude gives (shown in the log and notifications) are written in the
 - Every action is written to `journal.log` (next to the script, ignored by git). On startup, a log larger than 1 MB is renamed `journal.old.log` (replacing the previous one) and a new log is started.
 - On startup, the agent sorts files less than 7 days old that arrived while it was stopped. A file already processed (its name appears in the log) and not modified since is assumed to have been left in Downloads on purpose, and is not moved.
 - A Windows notification shows where each file went (or that it was a duplicate), each file sent to `To_sort` and each error. Clicking it opens the folder (or the log, for an error). Notifications show the agent's name and icon (`icon.png`), registered for the current user on startup.
+- **Cost**: after each file, a `TOKENS` line in the log gives the requests, tokens and approximate cost in $. Before each call to the AI, the agent adds up this month's `TOKENS` lines: once they reach `MAX_MONTHLY_COST` ($1 by default, in `config.py`), it writes `BUDGET REACHED`, shows a notification and leaves new files in Downloads until next month. They are sorted by the catch-up the next time the agent starts, if they are less than 7 days old.
 - Only one agent runs at a time: if another one is already running, a new instance writes `ALREADY RUNNING` to the log and stops.
 
 **Warning**: the AI can make mistakes and put a file in the wrong folder. The safeguards above limit the damage (no file is overwritten, and only an identical copy is ever deleted), but check from time to time where your files went: `journal.log` and the notifications show the destination of each file. Use at your own risk.
@@ -38,7 +39,7 @@ Requirements: Windows 10/11, Python 3.10 or newer, an account on [console.anthro
    pip install -r requirements.txt
    ```
 
-2. Create an API key in the Anthropic console (Settings → API Keys), then save it as a User environment variable, in PowerShell:
+2. In the Anthropic console, create a workspace for the agent (Settings → Workspaces) and give it a spend limit, $1 per month for example. It backs up the agent's own monthly budget. Create an API key in that workspace, then save it as a User environment variable, in PowerShell:
 
    ```powershell
    [Environment]::SetEnvironmentVariable("DOC_SORTER_API_KEY", "your-key", "User")
@@ -74,6 +75,8 @@ explorer.exe "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\agent-d
 The `pythonw` filter avoids stopping another program if the ID has been reused. Going through `explorer.exe` ensures the agent inherits the `DOC_SORTER_API_KEY` user variable.
 
 Then check in `journal.log` that a recent `STARTUP` line appears, and that a test file is `SORTED`. An authentication error only shows up on the first file.
+
+To watch the budget, search `journal.log` for `BUDGET REACHED` (the agent's monthly budget) and `ERROR` (an API error, e.g. when the workspace spend limit in the console is reached first).
 
 ## Tests
 
